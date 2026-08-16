@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">UhmK POS</string>
+    <string name="notice_channel_name">Staff notices</string>
+    <string name="notice_channel_desc">Messages sent by the store admin</string>
+    <string name="sync_channel_name">Background sync</string>
+    <string name="sync_channel_desc">Keeps sales and notices in sync</string>
+    <string name="reminder_channel_name">Reminders and stock alerts</string>
+    <string name="reminder_channel_desc">Scheduled store reminders and low-stock warnings</string>
+</resources>

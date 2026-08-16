@@ -1,0 +1,54 @@
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+/app/build/
+
+# ---------------------------------------------------------------------------
+# Signing material — never commit these.
+# Losing them means you can never ship an update that installs over the
+# existing app, so back them up somewhere private instead.
+# ---------------------------------------------------------------------------
+/keystore.properties
+*.jks
+*.keystore
+
+# ---------------------------------------------------------------------------
+# Private to this store — deliberately kept out of a public repository.
+# ---------------------------------------------------------------------------
+
+# Real Firebase config for this project (API keys, project and app ids).
+# Commit google-services.example.json instead and follow FIREBASE_SETUP.md.
+/app/google-services.json
+
+# The live product catalogue. This holds real supplier costs and therefore the
+# store's margins, which is commercial information and not something to publish.
+# seed_items.example.json ships a tiny made-up catalogue so a fresh clone runs.
+/app/src/main/assets/seed_items.json
+
+# Built APKs. These belong on the Releases page, not in git history —
+# committing binaries bloats the repo permanently.
+/dist/
+
+# Local debugging artefacts: screenshots, uiautomator dumps and pulled databases
+# kept while testing. These show real sales figures, product costs, user records
+# and the signed-in account, so they stay out of a public repository.
+/*.png
+/*.jpg
+/*.xml
+!/firestore.rules
+/.artifacts/
+/artifacts/
+/screenshots/
+
+# Database copies pulled off a device for debugging — real store data.
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3

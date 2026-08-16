@@ -1,0 +1,57 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN';
+    }
+
+    match /items/{itemId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /sales/{saleId} {
+      allow read: if isAdmin();
+      allow create: if signedIn()
+        && request.resource.data.cashierId == request.auth.uid;
+      allow update: if isAdmin()
+        || (signedIn()
+          && resource.data.cashierId == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([]));
+      allow delete: if isAdmin();
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+      allow update: if signedIn()
+        && request.auth.uid == uid
+        && (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['fcmToken'])
+          || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active', 'updatedAt'])
+            && request.resource.data.active == false)
+        );
+    }
+
+    match /notices/{noticeId} {
+      allow read: if isAdmin()
+        || (signedIn()
+          && (
+            !resource.data.keys().hasAny(['targetUid'])
+            || resource.data.targetUid == ''
+            || resource.data.targetUid == request.auth.uid
+          ));
+      allow write: if isAdmin();
+    }
+
+    match /auditLogs/{logId} {
+      allow read, write: if isAdmin();
+    }
+  }
+}

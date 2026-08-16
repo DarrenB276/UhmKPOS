@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Bag handle -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M44,48 L44,41 A10,10 0 0,1 64,41 L64,48"
+        android:strokeColor="#FFFFFF"
+        android:strokeLineCap="round"
+        android:strokeWidth="5" />
+
+    <!-- Bag body -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M34,47 L74,47 L77.5,83 L30.5,83 Z" />
+
+    <!-- Peso mark cut into the bag -->
+    <path
+        android:fillColor="#D32F2F"
+        android:pathData="M49,59 L49,75 M49,59 L56,59 A5,5 0 0,1 56,69 L49,69 M45.5,63.5 L60,63.5 M45.5,67 L60,67"
+        android:strokeColor="#D32F2F"
+        android:strokeLineCap="round"
+        android:strokeWidth="3" />
+</vector>

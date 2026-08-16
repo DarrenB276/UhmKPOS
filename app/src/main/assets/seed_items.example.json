@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "source": "Example catalogue — replace with your own seed_items.json",
+  "note": "Amounts are whole pesos. cost = unit cost. 0 means not yet known, which the app reports as unknown rather than guessing a margin. trackStock=false marks a service that never runs out.",
+  "items": [
+    { "sku": "1001", "handle": "sample-instant-noodles", "name": "Instant Noodles",  "category": "Noodles",  "cost": 32, "regular": 55, "student": 53, "stock": 40, "trackStock": true,  "sortIndex": 0 },
+    { "sku": "1002", "handle": "sample-iced-coffee",     "name": "Iced Coffee",      "category": "Drinks",   "cost": 30, "regular": 55, "student": 50, "stock": 24, "trackStock": true,  "sortIndex": 1 },
+    { "sku": "1003", "handle": "sample-bottled-water",   "name": "Bottled Water",    "category": "Drinks",   "cost": 0,  "regular": 17, "student": 14, "stock": 48, "trackStock": true,  "sortIndex": 2 },
+    { "sku": "1004", "handle": "sample-fish-cake",       "name": "Fish Cake",        "category": "Toppings", "cost": 9,  "regular": 22, "student": 19, "stock": 35, "trackStock": true,  "sortIndex": 3 },
+    { "sku": "1005", "handle": "sample-boiled-egg",      "name": "Boiled Egg",       "category": "Toppings", "cost": 8,  "regular": 15, "student": 12, "stock": 20, "trackStock": true,  "sortIndex": 4 },
+    { "sku": "1006", "handle": "sample-cooking-fee",     "name": "Cooking Fee",      "category": "Service",  "cost": 0,  "regular": 28, "student": 20, "stock": 0,  "trackStock": false, "sortIndex": 5 }
+  ]
+}
