@@ -600,6 +600,7 @@ fun PosApp(
                 val authVm: AuthViewModel = viewModel(factory = factory)
                 val state by vm.state.collectAsStateWithLifecycle()
                 val message by vm.message.collectAsStateWithLifecycle()
+                val updateState by vm.updateState.collectAsStateWithLifecycle()
 
                 LaunchedEffect(message) {
                     message?.let {
@@ -610,6 +611,7 @@ fun PosApp(
 
                 SettingsScreen(
                     state = state,
+                    updateState = updateState,
                     onUpdate = vm::update,
                     onSyncNow = vm::syncNow,
                     onReseed = vm::reseedCatalogue,
@@ -622,6 +624,9 @@ fun PosApp(
                     onRemoveProfileImage = vm::removeProfileImage,
                     onResetPassword = vm::resetPassword,
                     onDeleteAccount = vm::deleteAccount,
+                    onCheckForUpdates = vm::checkForUpdates,
+                    onDownloadAndInstallUpdate = vm::downloadAndInstallUpdate,
+                    onDismissUpdate = vm::dismissUpdate,
                     onSignOut = { authVm.signOut() },
                     contentPadding = inner,
                 )

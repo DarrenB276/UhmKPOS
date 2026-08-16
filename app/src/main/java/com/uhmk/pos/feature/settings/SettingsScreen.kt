@@ -41,6 +41,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -89,6 +90,7 @@ private enum class ReminderTimeTarget { LOW_STOCK_START, LOW_STOCK_END }
 @Composable
 fun SettingsScreen(
     state: SettingsUiState,
+    updateState: UpdateUiState,
     onUpdate: ((com.uhmk.pos.core.prefs.StoreSettings) -> com.uhmk.pos.core.prefs.StoreSettings) -> Unit,
     onSyncNow: () -> Unit,
     onReseed: () -> Unit,
@@ -101,6 +103,9 @@ fun SettingsScreen(
     onRemoveProfileImage: () -> Unit,
     onResetPassword: () -> Unit,
     onDeleteAccount: () -> Unit,
+    onCheckForUpdates: () -> Unit,
+    onDownloadAndInstallUpdate: () -> Unit,
+    onDismissUpdate: () -> Unit,
     onSignOut: () -> Unit,
     contentPadding: PaddingValues,
 ) {
@@ -626,6 +631,16 @@ fun SettingsScreen(
             )
         }
 
+        item { SectionHeader("App update") }
+        item {
+            ActionRow(
+                icon = { Icon(Icons.Default.Refresh, contentDescription = null) },
+                title = if (updateState.checking) "Checking for updates…" else "Check for updates",
+                subtitle = "Installed version ${BuildConfig.VERSION_NAME} · Updates from GitHub Releases",
+                onClick = onCheckForUpdates,
+            )
+        }
+
         item {
             Spacer(Modifier.height(24.dp))
             Text(
@@ -635,6 +650,51 @@ fun SettingsScreen(
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
         }
+    }
+
+    updateState.available?.let { update ->
+        AlertDialog(
+            onDismissRequest = {
+                if (!updateState.downloading) onDismissUpdate()
+            },
+            title = { Text("Version ${update.versionName} is available") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(update.title, fontWeight = FontWeight.Bold)
+                    Text(update.notes)
+                    if (updateState.downloading) {
+                        LinearProgressIndicator(
+                            progress = { (updateState.progress ?: 0) / 100f },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            updateState.progress?.let { "Downloading… $it%" } ?: "Downloading…",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = onDownloadAndInstallUpdate,
+                    enabled = !updateState.downloading,
+                ) {
+                    Text(
+                        when {
+                            updateState.downloading -> "Downloading…"
+                            updateState.downloadedApkPath != null -> "Install update"
+                            else -> "Download and install"
+                        }
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = onDismissUpdate,
+                    enabled = !updateState.downloading,
+                ) { Text("Later") }
+            },
+        )
     }
 
     if (confirmReseed) {

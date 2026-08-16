@@ -15,6 +15,9 @@ import com.uhmk.pos.core.repo.ItemRepository
 import com.uhmk.pos.core.repo.SaleRepository
 import com.uhmk.pos.core.sync.SyncManager
 import com.uhmk.pos.core.sync.SyncStore
+import com.uhmk.pos.core.update.AppUpdateInfo
+import com.uhmk.pos.core.update.InstallLaunchResult
+import com.uhmk.pos.core.update.UpdateManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -22,6 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -40,6 +44,14 @@ data class SettingsUiState(
     val pinAutoUnlock: Boolean = true,
 )
 
+data class UpdateUiState(
+    val checking: Boolean = false,
+    val downloading: Boolean = false,
+    val progress: Int? = null,
+    val available: AppUpdateInfo? = null,
+    val downloadedApkPath: String? = null,
+)
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class SettingsViewModel(
     private val settingsStore: SettingsStore,
@@ -54,9 +66,13 @@ class SettingsViewModel(
 ) : ViewModel() {
 
     private val busy = MutableStateFlow(false)
+    private val updateManager = UpdateManager(appContext)
 
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
+
+    private val _updateState = MutableStateFlow(UpdateUiState())
+    val updateState: StateFlow<UpdateUiState> = _updateState.asStateFlow()
 
     val state: StateFlow<SettingsUiState> = combine(
         settingsStore.settings,
@@ -138,6 +154,80 @@ class SettingsViewModel(
 
     fun consumeMessage() {
         _message.value = null
+    }
+
+    fun checkForUpdates() {
+        if (_updateState.value.checking || _updateState.value.downloading) return
+        _updateState.update { it.copy(checking = true) }
+        viewModelScope.launch {
+            updateManager.checkForUpdate().fold(
+                onSuccess = { update ->
+                    _updateState.value = if (update == null) {
+                        UpdateUiState()
+                    } else {
+                        UpdateUiState(available = update)
+                    }
+                    if (update == null) _message.value = "You're using the latest version"
+                },
+                onFailure = {
+                    _updateState.value = UpdateUiState()
+                    _message.value = "Could not check for updates: ${it.message}"
+                },
+            )
+        }
+    }
+
+    fun downloadAndInstallUpdate() {
+        val current = _updateState.value
+        val update = current.available ?: return
+        if (current.downloading || current.checking) return
+
+        val downloaded = current.downloadedApkPath
+            ?.let(::File)
+            ?.takeIf { it.isFile && it.length() > 0L }
+        if (downloaded != null) {
+            launchInstaller(downloaded)
+            return
+        }
+
+        _updateState.update { it.copy(downloading = true, progress = null) }
+        viewModelScope.launch {
+            updateManager.download(update) { progress ->
+                _updateState.update { it.copy(progress = progress) }
+            }.fold(
+                onSuccess = { apk ->
+                    _updateState.update {
+                        it.copy(
+                            downloading = false,
+                            progress = 100,
+                            downloadedApkPath = apk.absolutePath,
+                        )
+                    }
+                    launchInstaller(apk)
+                },
+                onFailure = {
+                    _updateState.update { it.copy(downloading = false, progress = null) }
+                    _message.value = "Could not download the update: ${it.message}"
+                },
+            )
+        }
+    }
+
+    fun dismissUpdate() {
+        if (!_updateState.value.downloading) _updateState.value = UpdateUiState()
+    }
+
+    private fun launchInstaller(apk: File) {
+        runCatching { updateManager.openInstaller(apk) }.fold(
+            onSuccess = { result ->
+                _message.value = when (result) {
+                    InstallLaunchResult.INSTALLER_OPENED -> "Android's installer is ready"
+                    InstallLaunchResult.PERMISSION_REQUIRED ->
+                        "Allow UhmK POS to install updates, then return and press Install update"
+                }
+            },
+            onFailure = { _message.value = "Could not open Android's installer: ${it.message}" },
+        )
     }
 
     fun setPin(pin: String, confirmation: String) {

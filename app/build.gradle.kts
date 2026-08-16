@@ -5,7 +5,13 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
-    alias(libs.plugins.google.services)
+    alias(libs.plugins.google.services) apply false
+}
+
+// The real Firebase config is intentionally private. Public clones still build in offline mode;
+// dropping app/google-services.json into a private checkout enables the normal cloud build.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
 }
 
 // Release signing is read from keystore.properties when present. If it is absent the
@@ -24,8 +30,8 @@ android {
         applicationId = "com.uhmk.pos"
         minSdk = 24
         targetSdk = 36
-        versionCode = 7
-        versionName = "2.5.0"
+        versionCode = 8
+        versionName = "2.6.0"
         vectorDrawables.useSupportLibrary = true
     }
 

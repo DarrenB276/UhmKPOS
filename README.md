@@ -1,6 +1,9 @@
 # UhmK POS
 
-Current build: **2.5.0**
+Current build: **2.6.0**
+
+Version 2.6 adds an in-app updater backed by GitHub Releases. Settings can check the latest
+published release, show its notes, download the signed APK, and open Android's installer.
 
 Version 2.5 adds restart-safe held tickets, configurable payment methods (Cash, GCash,
 QRPh, BPI, GoTyme and owner-added choices), account profile pictures, inactivity and
@@ -15,10 +18,9 @@ Your spreadsheet already answered that — `RUNNING PRICE STUDENT − SRP = PROF
 half is capital that has to go back into restocking, so it is never counted as earnings. Every
 profit figure in the app is computed that way, and SRP is always labelled *Capital*, never income.
 
-The catalogue ships with **85 products** imported from the store's existing till export. Its 70 `STU ...`
-rows are merged into their matching product as a Student price rather than imported as duplicate
-items. Costs already known are filled in; Stock clearly lists the
-remaining products whose cost still needs to be entered.
+The public project ships with a small made-up catalogue so it can be built and demonstrated safely.
+The store's real catalogue, supplier costs, Firebase configuration, signing key, screenshots and
+database files are intentionally excluded from version control.
 
 ---
 
@@ -92,7 +94,9 @@ whether staff can see profit, staff accounts, and reloading the built-in price l
 multiple one-time or everyday reminders with independent titles, notes and times, and configure the
 daily low-stock alert (enabled by default for 10:30 AM–9:30 PM). Each user can protect launch with a
 4–6 digit PIN, choose instant unlock after the correct PIN, send a password-reset email, or delete
-their account. The top-right profile menu also provides Account settings and Lock now.
+their account. The top-right profile menu also provides Account settings and Lock now. The app can
+check this repository's latest GitHub Release, display its notes, download the signed APK, and open
+Android's installer without a separate update server.
 
 **CSV export** — From Reports: profit by item, sales by category, active sale lines, complete order
 and receipt history (including voids/returns), or full inventory. Files open in Excel or Google Sheets.
@@ -171,9 +175,10 @@ Toolchain: Gradle 8.13, AGP 8.13.2, Kotlin 2.3.21, KSP 2.3.11, compileSdk 36, mi
 
 ### Changing the starting catalogue
 
-Edit `app/src/main/assets/seed_items.json` — plain pesos, mirroring the spreadsheet columns. It
-loads on first launch, and **Settings → Reload built-in price list** re-applies it while keeping
-your photos, stock counts and regular prices.
+Copy `app/src/main/assets/seed_items.example.json` to the ignored
+`app/src/main/assets/seed_items.json`, then replace the made-up rows with the private catalogue.
+It loads on first launch, and **Settings → Reload built-in price list** re-applies it while keeping
+photos, stock counts and regular prices.
 
 ---
 
