@@ -6,6 +6,9 @@ import com.uhmk.pos.core.db.CatalogueSeeder
 import com.uhmk.pos.core.db.CategoryCount
 import com.uhmk.pos.core.db.ItemDao
 import com.uhmk.pos.core.db.ItemEntity
+import com.uhmk.pos.core.export.InventoryCsvImporter
+import com.uhmk.pos.core.export.InventoryImportPlan
+import com.uhmk.pos.core.sync.ItemSyncPolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
@@ -27,8 +30,10 @@ class ItemRepository(
     suspend fun getById(id: String): ItemEntity? = dao.getById(id)
     suspend fun getBySku(sku: String): ItemEntity? = dao.getBySku(sku.trim())
 
-    suspend fun save(item: ItemEntity) =
-        dao.upsert(item.copy(updatedAt = System.currentTimeMillis(), dirty = true))
+    suspend fun save(item: ItemEntity) {
+        val previous = dao.getById(item.id)
+        dao.upsert(ItemSyncPolicy.prepareLocalChange(previous, item, System.currentTimeMillis()))
+    }
 
     suspend fun delete(item: ItemEntity) {
         item.imagePath?.let { runCatching { File(it).delete() } }
@@ -58,6 +63,17 @@ class ItemRepository(
 
     suspend fun countItems(): Int = dao.count()
 
+    /** Restores matching inventory rows and queues only fields that actually changed. */
+    suspend fun importInventoryCsv(source: Uri): InventoryImportPlan {
+        val content = withContext(Dispatchers.IO) {
+            context.contentResolver.openInputStream(source)?.bufferedReader()?.use { it.readText() }
+                ?: error("Could not open that CSV file")
+        }
+        val plan = InventoryCsvImporter.plan(content, dao.getAll())
+        plan.items.forEach { save(it) }
+        return plan
+    }
+
     /**
      * Seeds the catalogue if it is empty. [force] re-applies the shipped catalogue over existing
      * rows, which is what "Reload built-in price list" in Settings uses.
@@ -84,7 +100,9 @@ class ItemRepository(
                     lowStockAt = old.lowStockAt,
                 )
             }
-            dao.upsertAll(merged)
+            // Reload is an explicit admin action, but only the values that actually changed are
+            // queued. Blank bundled costs can never replace costs already entered by the store.
+            for (item in merged) save(item)
         } else {
             dao.upsertAll(seeded)
         }
@@ -116,7 +134,8 @@ class ItemRepository(
     suspend fun clearImage(itemId: String) {
         val item = dao.getById(itemId) ?: return
         item.imagePath?.let { runCatching { File(it).delete() } }
-        dao.upsert(item.copy(imagePath = null, updatedAt = System.currentTimeMillis(), dirty = true))
+        // Photos are device-private on the free Firebase plan and must not dirty the cloud row.
+        dao.upsert(item.copy(imagePath = null))
     }
 
     fun newItemTemplate(): ItemEntity = ItemEntity(

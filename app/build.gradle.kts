@@ -30,8 +30,8 @@ android {
         applicationId = "com.uhmk.pos"
         minSdk = 24
         targetSdk = 36
-        versionCode = 8
-        versionName = "2.6.0"
+        versionCode = 9
+        versionName = "2.6.1"
         vectorDrawables.useSupportLibrary = true
     }
 
@@ -134,4 +134,6 @@ dependencies {
     implementation(libs.firebase.firestore)
     implementation(libs.firebase.messaging)
     implementation(libs.kotlinx.coroutines.play.services)
+
+    testImplementation(libs.junit)
 }

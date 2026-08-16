@@ -2,11 +2,15 @@ package com.uhmk.pos.core.sync
 
 import android.content.Context
 import android.util.Log
+import com.google.firebase.Timestamp
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreSettings
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.PersistentCacheSettings
 import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.SetOptions
+import com.google.firebase.firestore.Source
 import androidx.room.withTransaction
 import com.uhmk.pos.core.db.AppDatabase
 import com.uhmk.pos.core.db.AuditLogEntity
@@ -23,13 +27,15 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.tasks.await
+import java.time.LocalDate
+import java.util.UUID
 
 /**
  * Pushes locally-changed rows to Firestore and pulls remote changes back into Room.
  *
- * Room stays the source of truth: nothing here is on the critical path of making a sale, so the
- * till keeps working when the connection does not. Rows carry `updatedAt` and `dirty`, and
- * conflicts resolve last-write-wins.
+ * Room keeps the till working offline, while Firestore is the shared catalogue of record. Item
+ * writes are versioned and field-level: a stale device can upload only fields a person actually
+ * changed, and an old blank cost can never erase a known supplier cost.
  */
 class SyncManager(
     private val context: Context,
@@ -60,6 +66,8 @@ class SyncManager(
         val usersPulled: Int = 0,
         val noticesPulled: Int = 0,
         val auditLogsPulled: Int = 0,
+        val itemConflictsResolved: Int = 0,
+        val knownCostsProtected: Int = 0,
     )
 
     suspend fun syncAll(): Result<SyncReport> {
@@ -78,6 +86,9 @@ class SyncManager(
                 usersPulled = pulled.usersPulled,
                 noticesPulled = pulled.noticesPulled,
                 auditLogsPulled = pulled.auditLogsPulled,
+                itemConflictsResolved = pushed.itemConflictsResolved +
+                    pulled.itemConflictsResolved,
+                knownCostsProtected = pushed.knownCostsProtected + pulled.knownCostsProtected,
             )
         }.onFailure { Log.w(TAG, "Sync failed: ${it.message}") }
     }
@@ -90,17 +101,16 @@ class SyncManager(
         val userDao = db.userDao()
         val noticeDao = db.noticeDao()
         val auditDao = db.auditLogDao()
-        val isAdmin = sessionStore.session.first().isAdmin
+        val session = sessionStore.session.first()
+        val isAdmin = session.isAdmin
 
         // Staff sales are authoritative; catalogue/user/notice edits are owner-only. Skipping
         // staff catalogue rows also prevents the built-in seed from overwriting live prices.
         val items = if (isAdmin) itemDao.dirtyItems() else emptyList()
-        if (items.isNotEmpty()) {
-            val batch = firestore.batch()
-            items.forEach { batch.set(firestore.collection(ITEMS).document(it.id), it.toMap()) }
-            batch.commit().await()
-            itemDao.clearDirty(items.map { it.id })
+        val itemOutcomes = items.map {
+            pushItem(it, session.uid, session.displayName.ifBlank { session.email })
         }
+        if (itemOutcomes.isNotEmpty()) itemDao.upsertAll(itemOutcomes.map(ItemPushOutcome::item))
 
         val sales = saleDao.dirtySales()
         if (sales.isNotEmpty()) {
@@ -180,11 +190,13 @@ class SyncManager(
         }
 
         return SyncReport(
-            itemsPushed = items.size,
+            itemsPushed = itemOutcomes.count { it.pushed },
             salesPushed = sales.size,
             usersPushed = users.size,
             noticesPushed = notices.size,
             auditLogsPushed = auditLogs.size,
+            itemConflictsResolved = itemOutcomes.count { it.hadVersionConflict },
+            knownCostsProtected = itemOutcomes.count { it.protectedKnownCost },
         )
     }
 
@@ -194,21 +206,54 @@ class SyncManager(
         val since = syncStore.lastSyncAt()
         val isAdmin = sessionStore.session.first().isAdmin
 
-        val remoteItems = firestore.collection(ITEMS)
-            .whereGreaterThan("updatedAt", since)
-            .get().await()
-            .documents.mapNotNull { it.data?.toItem() }
-
-        // Only accept a remote row if it is genuinely newer than what is on this device,
-        // otherwise a slow pull could stomp an edit the user just made.
-        val itemDao = db.itemDao()
-        val freshItems = remoteItems.filter { remote ->
-            val local = itemDao.getById(remote.id)
-            // Staff cannot edit catalogue records, so the owner's cloud copy is authoritative.
-            // Admin devices retain last-write-wins protection for unsynced local edits.
-            !isAdmin || local == null || remote.updatedAt > local.updatedAt
+        // First sync reads the complete catalogue, then server timestamps make later pulls
+        // incremental. Source.SERVER is deliberate: a cached empty result must never make a fresh
+        // device publish its seed over an existing store catalogue.
+        val catalogueCursor = syncStore.lastCatalogueServerAt()
+        val catalogueQuery = if (catalogueCursor <= 0) {
+            firestore.collection(ITEMS)
+        } else {
+            firestore.collection(ITEMS).whereGreaterThan(
+                "serverUpdatedAt",
+                Timestamp((catalogueCursor / 1_000), ((catalogueCursor % 1_000) * 1_000_000).toInt()),
+            )
         }
-        if (freshItems.isNotEmpty()) itemDao.upsertAll(freshItems.map { it.copy(dirty = false) })
+        val catalogueSnapshot = catalogueQuery.get(Source.SERVER).await()
+        val remoteItems = catalogueSnapshot.documents.mapNotNull { it.data?.toItem() }
+        catalogueSnapshot.documents.mapNotNull { it.getTimestamp("serverUpdatedAt") }
+            .maxOrNull()
+            ?.let { newest ->
+                // Re-read the final millisecond next time. That tiny overlap closes the gap when
+                // two server writes happen within the same millisecond.
+                syncStore.setLastCatalogueServerAt(newest.toDate().time - 1)
+            }
+
+        val itemDao = db.itemDao()
+        var itemConflicts = 0
+        var protectedCosts = 0
+        val freshItems = remoteItems.mapNotNull { remote ->
+            val local = itemDao.getById(remote.id)
+            val merged = when {
+                local == null -> remote
+                !isAdmin -> remote.copy(imagePath = local.imagePath)
+                else -> ItemSyncPolicy.mergeRemote(remote, local).also { result ->
+                    if (result.hadVersionConflict) itemConflicts++
+                    if (result.protectedKnownCost) protectedCosts++
+                }.item
+            }
+            merged.takeIf { it != local }
+        }
+        if (freshItems.isNotEmpty()) itemDao.upsertAll(freshItems)
+
+        // A genuinely empty Firebase project may be bootstrapped from the bundled catalogue, but
+        // only after a successful server read proves that no cloud item exists.
+        if (catalogueCursor <= 0 && remoteItems.isEmpty() && isAdmin) {
+            val now = System.currentTimeMillis()
+            val bootstrap = itemDao.getAll().map { local ->
+                ItemSyncPolicy.prepareLocalChange(null, local, now)
+            }
+            if (bootstrap.isNotEmpty()) itemDao.upsertAll(bootstrap)
+        }
 
         // Sales are immutable except for a void tombstone. Pulling them makes staff receipts and
         // day totals visible on the admin device; updatedAt also catches tallies stamped in the past.
@@ -299,7 +344,134 @@ class SyncManager(
             usersPulled = remoteUsers.size,
             noticesPulled = remoteNotices.size,
             auditLogsPulled = remoteAuditLogs.size,
+            itemConflictsResolved = itemConflicts,
+            knownCostsProtected = protectedCosts,
         )
+    }
+
+    private data class ItemPushOutcome(
+        val item: ItemEntity,
+        val pushed: Boolean,
+        val hadVersionConflict: Boolean,
+        val protectedKnownCost: Boolean,
+    )
+
+    /**
+     * A Firestore transaction compares the local baseline with the current cloud revision before
+     * applying a patch. This remains safe even when two admins press Sync at the same moment.
+     */
+    private suspend fun pushItem(
+        local: ItemEntity,
+        actorId: String,
+        actorName: String,
+    ): ItemPushOutcome {
+        val itemRef = firestore.collection(ITEMS).document(local.id)
+        val auditRef = firestore.collection(AUDIT_LOGS).document(UUID.randomUUID().toString())
+        val occurredAt = System.currentTimeMillis()
+        val businessDate = LocalDate.now().toEpochDay()
+
+        return firestore.runTransaction { transaction ->
+            val snapshot = transaction.get(itemRef)
+            val remote = snapshot.data?.toItem()
+            val merge = if (remote == null) {
+                ItemSyncPolicy.MergeResult(
+                    item = local,
+                    hadVersionConflict = false,
+                    protectedKnownCost = false,
+                )
+            } else {
+                ItemSyncPolicy.mergeRemote(remote, local)
+            }
+            val changedFields = if (remote == null) {
+                ItemSyncPolicy.ALL_FIELDS
+            } else {
+                ItemSyncPolicy.decode(merge.item.pendingFields)
+            }
+
+            if (changedFields.isEmpty()) {
+                return@runTransaction ItemPushOutcome(
+                    item = (remote ?: merge.item).copy(
+                        imagePath = local.imagePath,
+                        pendingFields = "",
+                        pendingStockDelta = 0,
+                        stockAbsolutePending = false,
+                        dirty = false,
+                    ),
+                    pushed = false,
+                    hadVersionConflict = merge.hadVersionConflict,
+                    protectedKnownCost = merge.protectedKnownCost,
+                )
+            }
+
+            val nextVersion = (remote?.cloudVersion ?: 0) + 1
+            val updated = merge.item.copy(
+                updatedAt = occurredAt,
+                cloudVersion = nextVersion,
+                pendingFields = "",
+                pendingStockDelta = 0,
+                stockAbsolutePending = false,
+                dirty = false,
+            )
+            val patch = ItemSyncPolicy.cloudValues(updated, changedFields).toMutableMap().apply {
+                put("id", updated.id)
+                put("revision", nextVersion)
+                put("updatedAt", occurredAt)
+                put("serverUpdatedAt", FieldValue.serverTimestamp())
+                put("lastChangedFields", changedFields.toList())
+                put("updatedByUid", actorId)
+                put("updatedByName", actorName)
+            }
+            transaction.set(itemRef, patch, SetOptions.merge())
+
+            // New-project bootstrap creates many starter rows; audit only real catalogue edits.
+            if (remote != null) {
+                transaction.set(
+                    auditRef,
+                    mapOf(
+                        "id" to auditRef.id,
+                        "action" to "ITEM_UPDATE",
+                        "entityId" to local.id,
+                        "businessDateEpochDay" to businessDate,
+                        "actorId" to actorId,
+                        "actorName" to actorName,
+                        "occurredAt" to occurredAt,
+                        "beforeSummary" to itemSummary(remote, changedFields),
+                        "afterSummary" to itemSummary(updated, changedFields),
+                        "changedFields" to changedFields.toList(),
+                        "fromRevision" to remote.cloudVersion,
+                        "toRevision" to nextVersion,
+                    ),
+                )
+            }
+
+            ItemPushOutcome(
+                item = updated.copy(imagePath = local.imagePath),
+                pushed = true,
+                hadVersionConflict = merge.hadVersionConflict,
+                protectedKnownCost = merge.protectedKnownCost,
+            )
+        }.await()
+    }
+
+    private fun itemSummary(item: ItemEntity, fields: Set<String>): String = fields.joinToString(", ") {
+        val value = when (it) {
+            ItemSyncPolicy.NAME -> item.name
+            ItemSyncPolicy.CATEGORY -> item.category
+            ItemSyncPolicy.SKU -> item.sku
+            ItemSyncPolicy.TRACK_STOCK -> item.trackStock
+            ItemSyncPolicy.COST -> if (item.costKnown) item.costCentavos else "not set"
+            ItemSyncPolicy.COST_KNOWN -> item.costKnown
+            ItemSyncPolicy.STUDENT_PRICE -> item.studentCentavos
+            ItemSyncPolicy.REGULAR_PRICE -> item.regularCentavos
+            ItemSyncPolicy.BOX_COST -> item.boxCostCentavos
+            ItemSyncPolicy.UNITS_PER_BOX -> item.unitsPerBox
+            ItemSyncPolicy.STOCK -> item.stockQty
+            ItemSyncPolicy.LOW_STOCK_AT -> item.lowStockAt
+            ItemSyncPolicy.ACTIVE -> item.active
+            ItemSyncPolicy.SORT_INDEX -> item.sortIndex
+            else -> ""
+        }
+        "$it=$value"
     }
 
     // ---------------- notices ----------------
@@ -432,6 +604,7 @@ private fun ItemEntity.toMap(): Map<String, Any?> = mapOf(
     "active" to active,
     "sortIndex" to sortIndex,
     "updatedAt" to updatedAt,
+    "revision" to cloudVersion,
 )
 
 private fun Map<String, Any?>.toItem(): ItemEntity? {
@@ -456,6 +629,8 @@ private fun Map<String, Any?>.toItem(): ItemEntity? {
         active = this["active"] as? Boolean ?: true,
         sortIndex = int("sortIndex", 0),
         updatedAt = long("updatedAt"),
+        cloudVersion = long("revision"),
+        pendingFields = "",
         dirty = false,
     )
 }

@@ -24,6 +24,9 @@ interface ItemDao {
     @Query("SELECT * FROM items WHERE id = :id")
     suspend fun getById(id: String): ItemEntity?
 
+    @Query("SELECT * FROM items ORDER BY sortIndex ASC, name ASC")
+    suspend fun getAll(): List<ItemEntity>
+
     @Query("SELECT * FROM items WHERE sku = :sku LIMIT 1")
     suspend fun getBySku(sku: String): ItemEntity?
 
@@ -38,7 +41,14 @@ interface ItemDao {
     )
     fun observeCategoryCounts(): Flow<List<CategoryCount>>
 
-    @Query("UPDATE items SET category = :to, updatedAt = :now, dirty = 1 WHERE category = :from")
+    @Query(
+        """
+        UPDATE items SET category = :to, updatedAt = :now, dirty = 1,
+            pendingFields = CASE WHEN pendingFields = '' THEN 'category'
+                                 ELSE pendingFields || ',category' END
+        WHERE category = :from
+        """
+    )
     suspend fun renameCategory(from: String, to: String, now: Long)
 
     @Query("SELECT COUNT(*) FROM items")
@@ -50,7 +60,7 @@ interface ItemDao {
     @Query("SELECT * FROM items WHERE active = 1 AND trackStock = 1 AND stockQty <= lowStockAt ORDER BY stockQty ASC, name ASC")
     suspend fun lowStockItems(): List<ItemEntity>
 
-    @Query("SELECT * FROM items WHERE dirty = 1")
+    @Query("SELECT * FROM items WHERE dirty = 1 AND pendingFields != ''")
     suspend fun dirtyItems(): List<ItemEntity>
 
     @Upsert
@@ -65,10 +75,22 @@ interface ItemDao {
     @Query("DELETE FROM items")
     suspend fun deleteAll()
 
-    @Query("UPDATE items SET dirty = 0 WHERE id IN (:ids)")
+    @Query(
+        """
+        UPDATE items SET dirty = 0, pendingFields = '', pendingStockDelta = 0,
+            stockAbsolutePending = 0 WHERE id IN (:ids)
+        """
+    )
     suspend fun clearDirty(ids: List<String>)
 
-    @Query("UPDATE items SET costCentavos = :cost, costKnown = 1, updatedAt = :now, dirty = 1 WHERE id = :id")
+    @Query(
+        """
+        UPDATE items SET costCentavos = :cost, costKnown = 1, updatedAt = :now, dirty = 1,
+            pendingFields = CASE WHEN pendingFields = '' THEN 'costCentavos,costKnown'
+                                 ELSE pendingFields || ',costCentavos,costKnown' END
+        WHERE id = :id
+        """
+    )
     suspend fun setCost(id: String, cost: Long, now: Long)
 
     /**
@@ -77,16 +99,37 @@ interface ItemDao {
      */
     @Query(
         """
-        UPDATE items SET stockQty = MAX(0, stockQty - :qty), updatedAt = :now, dirty = 1
+        UPDATE items SET stockQty = MAX(0, stockQty - :qty), updatedAt = :now, dirty = 1,
+            pendingFields = CASE WHEN pendingFields = '' THEN 'stockQty'
+                                 ELSE pendingFields || ',stockQty' END,
+            pendingStockDelta = CASE WHEN stockAbsolutePending = 1 THEN pendingStockDelta
+                                     ELSE pendingStockDelta - MIN(stockQty, :qty) END
         WHERE id = :id AND trackStock = 1
         """
     )
     suspend fun decrementStock(id: String, qty: Int, now: Long)
 
-    @Query("UPDATE items SET stockQty = stockQty + :qty, updatedAt = :now, dirty = 1 WHERE id = :id AND trackStock = 1")
+    @Query(
+        """
+        UPDATE items SET stockQty = stockQty + :qty, updatedAt = :now, dirty = 1,
+            pendingFields = CASE WHEN pendingFields = '' THEN 'stockQty'
+                                 ELSE pendingFields || ',stockQty' END,
+            pendingStockDelta = CASE WHEN stockAbsolutePending = 1 THEN pendingStockDelta
+                                     ELSE pendingStockDelta + :qty END
+        WHERE id = :id AND trackStock = 1
+        """
+    )
     suspend fun addStock(id: String, qty: Int, now: Long)
 
-    @Query("UPDATE items SET stockQty = :qty, updatedAt = :now, dirty = 1 WHERE id = :id")
+    @Query(
+        """
+        UPDATE items SET stockQty = :qty, updatedAt = :now, dirty = 1,
+            pendingFields = CASE WHEN pendingFields = '' THEN 'stockQty'
+                                 ELSE pendingFields || ',stockQty' END,
+            pendingStockDelta = 0, stockAbsolutePending = 1
+        WHERE id = :id
+        """
+    )
     suspend fun setStock(id: String, qty: Int, now: Long)
 }
 

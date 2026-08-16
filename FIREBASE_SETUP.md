@@ -114,10 +114,19 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN';
     }
 
-    // Staff need prices to sell; only an admin may change them.
+    // Staff need prices to sell. Admin catalogue writes must use the revision transaction added
+    // in v2.6.1; this blocks an old installation from uploading a stale whole product record.
     match /items/{itemId} {
-      allow read:  if signedIn();
-      allow write: if isAdmin();
+      allow read: if signedIn();
+      allow create: if isAdmin()
+        && request.resource.data.revision == 1
+        && request.resource.data.serverUpdatedAt == request.time;
+      allow update: if isAdmin()
+        && request.resource.data.revision == resource.data.get('revision', 0) + 1
+        && request.resource.data.serverUpdatedAt == request.time
+        && !(resource.data.get('costKnown', false) == true
+          && request.resource.data.costKnown != true);
+      allow delete: if isAdmin();
     }
 
     // Staff record sales. An identical retry is allowed so a connection drop after upload does
@@ -176,6 +185,10 @@ cd <project-folder>; .\rebuild.ps1
 
 Install the new APK, sign in with the email and password from step 4, and Settings should now
 read **"Cloud sync on"**.
+
+> Install v2.6.1 or newer on every store phone before entering real supplier costs. These rules
+> intentionally refuse catalogue writes from older builds, while sales remain safely stored on
+> the phone until its app is updated.
 
 ## 9. Add staff and additional admins
 

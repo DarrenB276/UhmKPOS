@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -94,6 +95,7 @@ fun SettingsScreen(
     onUpdate: ((com.uhmk.pos.core.prefs.StoreSettings) -> com.uhmk.pos.core.prefs.StoreSettings) -> Unit,
     onSyncNow: () -> Unit,
     onReseed: () -> Unit,
+    onImportInventory: (android.net.Uri) -> Unit,
     onResetSales: () -> Unit,
     onOpenStaff: () -> Unit,
     onSetPin: (String, String) -> Unit,
@@ -120,6 +122,9 @@ fun SettingsScreen(
     val profilePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
     ) { uri -> uri?.let(onPickProfileImage) }
+    val inventoryPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let(onImportInventory) }
 
     LazyColumn(
         contentPadding = PaddingValues(
@@ -487,6 +492,16 @@ fun SettingsScreen(
             )
             }
             item {
+            ActionRow(
+                icon = { Icon(Icons.Default.UploadFile, contentDescription = null) },
+                title = "Restore inventory CSV",
+                subtitle = "Imports a Full inventory export and changes only matching products.",
+                onClick = {
+                    inventoryPicker.launch(
+                        arrayOf("text/csv", "text/comma-separated-values", "application/vnd.ms-excel")
+                    )
+                },
+            )
             ActionRow(
                 icon = { Icon(Icons.Default.Group, contentDescription = null) },
                 title = "Staff accounts",

@@ -18,6 +18,7 @@ class SyncStore(private val context: Context) {
     private val lastSyncKey = longPreferencesKey("last_sync_at")
     private val lastNoticeSeenKey = longPreferencesKey("last_notice_seen")
     private val lastSaleAlertSeenKey = longPreferencesKey("last_sale_alert_seen")
+    private val lastCatalogueServerAtKey = longPreferencesKey("last_catalogue_server_at")
 
     val lastSyncFlow: Flow<Long> = context.syncDataStore.data.map { it[lastSyncKey] ?: 0L }
 
@@ -39,5 +40,12 @@ class SyncStore(private val context: Context) {
 
     suspend fun setLastSaleAlertSeen(value: Long) {
         context.syncDataStore.edit { it[lastSaleAlertSeenKey] = value }
+    }
+
+    suspend fun lastCatalogueServerAt(): Long =
+        context.syncDataStore.data.map { it[lastCatalogueServerAtKey] ?: 0L }.first()
+
+    suspend fun setLastCatalogueServerAt(value: Long) {
+        context.syncDataStore.edit { it[lastCatalogueServerAtKey] = value.coerceAtLeast(0L) }
     }
 }

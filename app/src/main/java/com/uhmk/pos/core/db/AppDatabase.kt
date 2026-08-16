@@ -19,7 +19,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TicketEntity::class,
         TicketLineEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -200,6 +200,26 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v10 replaces unsafe whole-row catalogue uploads with versioned, field-level changes.
+         *
+         * Older builds marked both starter rows and genuine edits with the same `dirty` flag, so
+         * there is no trustworthy way to distinguish them during migration. Quarantine every
+         * legacy item once, pull the cloud catalogue, and let only edits made by v10+ upload.
+         */
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE items ADD COLUMN cloudVersion INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE items ADD COLUMN pendingFields TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE items ADD COLUMN pendingStockDelta INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE items ADD COLUMN stockAbsolutePending INTEGER NOT NULL DEFAULT 0")
+                db.execSQL(
+                    "UPDATE items SET dirty = 0, pendingFields = '', " +
+                        "pendingStockDelta = 0, stockAbsolutePending = 0"
+                )
+            }
+        }
+
         fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "uhmk-pos.db")
                 .addMigrations(
@@ -211,6 +231,7 @@ abstract class AppDatabase : RoomDatabase() {
                     MIGRATION_6_7,
                     MIGRATION_7_8,
                     MIGRATION_8_9,
+                    MIGRATION_9_10,
                 )
                 .build()
     }

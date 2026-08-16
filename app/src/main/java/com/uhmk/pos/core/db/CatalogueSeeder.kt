@@ -28,8 +28,6 @@ object CatalogueSeeder {
             ?: return emptyList()
 
         val array = JSONObject(raw).optJSONArray("items") ?: return emptyList()
-        val now = System.currentTimeMillis()
-
         return (0 until array.length()).map { i ->
             val o = array.getJSONObject(i)
             val handle = o.getString("handle")
@@ -55,8 +53,12 @@ object CatalogueSeeder {
                 imagePath = null,
                 active = true,
                 sortIndex = o.optInt("sortIndex", i),
-                updatedAt = now,
-                dirty = true,
+                // A bundled catalogue is a local fallback, not an administrator edit. A signed-in
+                // device downloads the shared catalogue before these rows can ever be published.
+                updatedAt = 0,
+                cloudVersion = 0,
+                pendingFields = "",
+                dirty = false,
             )
         }
     }

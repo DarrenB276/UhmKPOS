@@ -13,7 +13,17 @@ service cloud.firestore {
 
     match /items/{itemId} {
       allow read: if signedIn();
-      allow write: if isAdmin();
+      // v2.6.1+ catalogue writes are transactional and revisioned. This deliberately rejects an
+      // old installation's whole-document upload, which could otherwise resurrect blank costs.
+      allow create: if isAdmin()
+        && request.resource.data.revision == 1
+        && request.resource.data.serverUpdatedAt == request.time;
+      allow update: if isAdmin()
+        && request.resource.data.revision == resource.data.get('revision', 0) + 1
+        && request.resource.data.serverUpdatedAt == request.time
+        && !(resource.data.get('costKnown', false) == true
+          && request.resource.data.costKnown != true);
+      allow delete: if isAdmin();
     }
 
     match /sales/{saleId} {

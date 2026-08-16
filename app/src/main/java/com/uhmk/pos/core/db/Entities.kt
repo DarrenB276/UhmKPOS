@@ -38,7 +38,15 @@ data class ItemEntity(
     val active: Boolean = true,
     val sortIndex: Int = 0,
     val updatedAt: Long = System.currentTimeMillis(),
-    val dirty: Boolean = true,
+    /** Last catalogue revision accepted from Firestore. Never derived from a device clock. */
+    val cloudVersion: Long = 0,
+    /** Comma-separated cloud fields intentionally changed on this device. */
+    val pendingFields: String = "",
+    /** Relative stock movement waiting for cloud, so simultaneous sales do not lose a unit. */
+    val pendingStockDelta: Int = 0,
+    /** True for a deliberate stock count/import; false for sale/restock deltas. */
+    val stockAbsolutePending: Boolean = false,
+    val dirty: Boolean = false,
 ) {
     fun priceFor(tier: PriceTier): Long =
         if (tier == PriceTier.REGULAR) regularCentavos else studentCentavos

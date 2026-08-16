@@ -105,8 +105,16 @@ class SettingsViewModel(
         viewModelScope.launch {
             syncManager.syncAll().fold(
                 onSuccess = {
-                    _message.value = "Synced — ${it.itemsPushed + it.salesPushed} up, " +
-                        "${it.itemsPulled + it.salesPulled + it.noticesPulled} down"
+                    _message.value = buildString {
+                        append("Synced — ${it.itemsPushed + it.salesPushed} up, ")
+                        append("${it.itemsPulled + it.salesPulled + it.noticesPulled} down")
+                        if (it.itemConflictsResolved > 0) {
+                            append(" · ${it.itemConflictsResolved} stale item edits merged safely")
+                        }
+                        if (it.knownCostsProtected > 0) {
+                            append(" · ${it.knownCostsProtected} known costs protected")
+                        }
+                    }
                 },
                 onFailure = {
                     _message.value = if (syncManager.isCloudEnabled) {
@@ -128,6 +136,33 @@ class SettingsViewModel(
             val count = itemRepository.seedIfEmpty(force = true)
             busy.value = false
             _message.value = "Reloaded $count items from the built-in price list"
+        }
+    }
+
+    fun importInventoryCsv(uri: Uri) {
+        if (busy.value) return
+        if (!state.value.session.isAdmin) {
+            _message.value = "Only an admin can restore inventory"
+            return
+        }
+        busy.value = true
+        viewModelScope.launch {
+            runCatching { itemRepository.importInventoryCsv(uri) }.fold(
+                onSuccess = { plan ->
+                    val sync = if (plan.items.isNotEmpty() && syncManager.isCloudEnabled) {
+                        syncManager.syncAll()
+                    } else null
+                    _message.value = buildString {
+                        append("Restored ${plan.items.size} inventory items")
+                        if (plan.unchanged > 0) append(" · ${plan.unchanged} already matched")
+                        if (plan.unmatched > 0) append(" · ${plan.unmatched} not found")
+                        if (plan.invalidValues > 0) append(" · ${plan.invalidValues} invalid values skipped")
+                        if (sync?.isFailure == true) append(" · saved here; cloud sync will retry")
+                    }
+                },
+                onFailure = { _message.value = it.message ?: "Could not restore inventory CSV" },
+            )
+            busy.value = false
         }
     }
 

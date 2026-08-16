@@ -1,6 +1,14 @@
 # UhmK POS
 
-Current build: **2.6.0**
+Current build: **2.6.1**
+
+Version 2.6.1 is a catalogue data-safety release. Starter products are no longer treated as edits,
+new devices verify and download the server catalogue before publishing anything, and admin item
+changes use Firestore revisions plus field-level patches. A stale phone can change the field its
+user edited, but it cannot replace unrelated prices, stock or costs. Known supplier costs are
+specifically protected from being changed back to “not set.” Concurrent sales synchronize stock as
+deltas instead of overwriting one another. Settings also restores matching products from a Full
+inventory CSV, and item changes are recorded in the admin audit collection.
 
 Version 2.6 adds an in-app updater backed by GitHub Releases. Settings can check the latest
 published release, show its notes, download the signed APK, and open Android's installer.
@@ -98,8 +106,10 @@ their account. The top-right profile menu also provides Account settings and Loc
 check this repository's latest GitHub Release, display its notes, download the signed APK, and open
 Android's installer without a separate update server.
 
-**CSV export** — From Reports: profit by item, sales by category, active sale lines, complete order
-and receipt history (including voids/returns), or full inventory. Files open in Excel or Google Sheets.
+**CSV export and restore** — From Reports: profit by item, sales by category, active sale lines,
+complete order and receipt history (including voids/returns), or full inventory. Files open in Excel
+or Google Sheets. Admins can restore a Full inventory CSV from Settings → Data; stable item IDs are
+used when available and “not set” cells never clear a completed cost.
 
 ---
 
@@ -136,10 +146,11 @@ settled on each, and the constraints that are easy to trip over.
 
 Native Android: **Kotlin + Jetpack Compose**, Material 3.
 
-Room is the source of truth and Firestore is a sync layer on top — never the other way round. A
-sale is written locally and returns immediately; syncing happens afterwards in the background.
-That is why the till keeps working when the shop wifi drops, and why the app was usable before
-Firebase existed at all.
+Room is the immediate source of truth for offline sales and Firestore is the shared catalogue and
+sync layer. A sale is written locally and returns immediately; syncing happens afterwards in the
+background. Catalogue edits carry a cloud revision and explicit pending fields, so no item decision
+depends on which device clock happens to be later. That is why the till keeps working when the shop
+wifi drops without letting a stale device replace unrelated inventory data.
 
 ```
 app/src/main/java/com/uhmk/pos/
@@ -177,7 +188,9 @@ Toolchain: Gradle 8.13, AGP 8.13.2, Kotlin 2.3.21, KSP 2.3.11, compileSdk 36, mi
 
 Copy `app/src/main/assets/seed_items.example.json` to the ignored
 `app/src/main/assets/seed_items.json`, then replace the made-up rows with the private catalogue.
-It loads on first launch, and **Settings → Reload built-in price list** re-applies it while keeping
+It loads on first launch as a non-authoritative local fallback. Once signed in, the app verifies the
+server catalogue before it can publish starter rows. **Settings → Reload built-in price list** is an
+explicit admin action that re-applies changed spreadsheet fields while keeping completed costs,
 photos, stock counts and regular prices.
 
 ---

@@ -154,15 +154,15 @@ object CsvExporter {
         val sb = StringBuilder()
         sb.appendLine(
             row(
-                "SKU", "Item", "Category", "Unit cost", "Student price", "Regular price",
+                "Item ID", "SKU", "Item", "Category", "Unit cost", "Student price", "Regular price",
                 "Student profit", "Regular profit", "In stock", "Warn at", "Tracks stock",
-                "Stock capital", "Active",
+                "Box cost", "Units per box", "Stock capital", "Active",
             )
         )
         items.forEach { i ->
             sb.appendLine(
                 row(
-                    i.sku, i.name, i.category,
+                    i.id, i.sku, i.name, i.category,
                     if (i.costKnown) Money.formatAmount(i.costCentavos) else UNKNOWN,
                     Money.formatAmount(i.studentCentavos),
                     Money.formatAmount(i.regularCentavos),
@@ -171,6 +171,8 @@ object CsvExporter {
                     if (i.trackStock) i.stockQty.toString() else "n/a",
                     if (i.trackStock) i.lowStockAt.toString() else "n/a",
                     if (i.trackStock) "yes" else "no",
+                    Money.formatAmount(i.boxCostCentavos),
+                    i.unitsPerBox.toString(),
                     if (i.costKnown) Money.formatAmount(i.stockQty * i.costCentavos) else UNKNOWN,
                     if (i.active) "yes" else "no",
                 )

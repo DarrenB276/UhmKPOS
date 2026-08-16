@@ -15,11 +15,13 @@ only a 2.3+ compiler reads, and KSP (needed by Room) has no 2.4 line yet — it 
 under its own independent versioning. Pinned: Kotlin 2.3.21, KSP 2.3.11, AGP 8.13.2, Gradle 8.13.
 Bumping Kotlin breaks the build until KSP catches up.
 
-**Room is the source of truth; Firestore is a sync layer.** A sale is written locally and returns
-immediately. Never put a network call on the path of recording a sale. Rows carry `updatedAt` +
-`dirty`; the sync pushes dirty rows and resolves last-write-wins.
+**Room records sales immediately; Firestore is the shared sync layer.** Never put a network call on
+the path of recording a sale. Sales still use `updatedAt` + `dirty`. Catalogue rows are different:
+database v10 adds `cloudVersion`, `pendingFields`, `pendingStockDelta`, and
+`stockAbsolutePending`. `ItemSyncPolicy` and Firestore transactions merge intentional field edits;
+do not replace this with whole-row writes or device-clock last-write-wins.
 
-**Database is at version 9.** Add a `Migration(9, 10)` in `core/db/AppDatabase.kt` and register it
+**Database is at version 10.** Add a `Migration(10, 11)` in `core/db/AppDatabase.kt` and register it
 in `addMigrations(...)`. Follow the existing style — every migration there has a comment saying
 *why*. Never destructive-migrate: sales are money records.
 
@@ -41,6 +43,28 @@ push. Do not design anything that needs a server.
 **Adaptive layout:** `core/ui/Adaptive.kt` — `rememberWindowSize()`, `supportsTwoPane`,
 `productTileMinWidth()`. Phones are COMPACT; docked panels and one-row headers are gated on
 `supportsTwoPane`.
+
+---
+
+## Completed foundation: catalogue sync safety
+
+Version 2.6.1 fixed the stale-device overwrite incident and must remain the minimum version before
+the store re-enters supplier costs.
+
+- Bundled seed rows are clean and cannot upload merely because an app was freshly installed.
+- A server-only catalogue read happens before item pushes. Only a confirmed empty Firebase project
+  can bootstrap from the bundled list.
+- Each local edit queues only its changed fields. Firestore transactions increment `revision` and
+  merge against the current server row.
+- A known cost cannot automatically become unknown; intentional zero-cost services remain valid.
+- Sale/restock stock movements queue deltas so two tills do not lose one another's quantity change.
+- Full inventory CSV exports include stable item IDs and can be restored from Settings → Data.
+- Item writes add before/after audit records with the admin account and revisions.
+- Migration 9→10 quarantines indistinguishable legacy dirty catalogue rows once, preventing an old
+  v2.6.0 cache from uploading after upgrade.
+
+Regression tests live under `app/src/test` and cover the original blank-cost overwrite, stale
+unrelated edits, simultaneous stock movements, CSV restore, and quoted CSV values.
 
 ---
 
