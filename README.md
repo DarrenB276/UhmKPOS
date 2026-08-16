@@ -10,8 +10,10 @@ specifically protected from being changed back to “not set.” Concurrent sale
 deltas instead of overwriting one another. Settings also restores matching products from a Full
 inventory CSV, and item changes are recorded in the admin audit collection.
 
-Version 2.6 adds an in-app updater backed by GitHub Releases. Settings can check the latest
-published release, show its notes, download the signed APK, and open Android's installer.
+Version 2.6 adds an in-app updater backed by GitHub Releases. It checks for updates at launch and
+every six hours while online, posts one notification per new version, and opens Settings when the
+alert is tapped. Settings can also check manually, show release notes, download the signed APK, and
+open Android's installer.
 
 Version 2.5 adds restart-safe held tickets, configurable payment methods (Cash, GCash,
 QRPh, BPI, GoTyme and owner-added choices), account profile pictures, inactivity and
@@ -104,7 +106,8 @@ daily low-stock alert (enabled by default for 10:30 AM–9:30 PM). Each user can
 4–6 digit PIN, choose instant unlock after the correct PIN, send a password-reset email, or delete
 their account. The top-right profile menu also provides Account settings and Lock now. The app can
 check this repository's latest GitHub Release, display its notes, download the signed APK, and open
-Android's installer without a separate update server.
+Android's installer without a separate update server. An online background check runs every six
+hours and posts one concise notification for each new version.
 
 **CSV export and restore** — From Reports: profit by item, sales by category, active sale lines,
 complete order and receipt history (including voids/returns), or full inventory. Files open in Excel

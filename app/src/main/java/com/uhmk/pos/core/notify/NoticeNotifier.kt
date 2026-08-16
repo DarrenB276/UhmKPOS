@@ -22,6 +22,7 @@ import com.uhmk.pos.core.money.Money
 import com.uhmk.pos.core.prefs.StoreSettings
 import com.uhmk.pos.core.repo.NoticeRepository
 import com.uhmk.pos.core.time.Clock
+import com.uhmk.pos.core.update.AppUpdateInfo
 import kotlinx.coroutines.flow.first
 
 object NoticeNotifier {
@@ -31,11 +32,22 @@ object NoticeNotifier {
     const val CHANNEL_REMINDERS = "store_reminders"
     const val CHANNEL_SALES = "admin_sale_alerts"
     const val CHANNEL_SECURITY = "admin_setup_alerts"
+    const val CHANNEL_UPDATES = "app_updates"
     private const val GROUP = "com.uhmk.pos.NOTICES"
 
     fun createChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
+
+        manager.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_UPDATES,
+                "App updates",
+                NotificationManager.IMPORTANCE_DEFAULT,
+            ).apply {
+                description = "Notifications when a new UhmK POS version is ready"
+            }
+        )
 
         manager.createNotificationChannel(
             NotificationChannel(
@@ -236,6 +248,29 @@ object NoticeNotifier {
         }
     }
 
+    /** Shows one concise update alert; the worker handles per-version deduplication. */
+    @SuppressLint("MissingPermission")
+    fun showUpdateAvailable(context: Context, update: AppUpdateInfo): Boolean {
+        if (!canPost(context)) return false
+        val notification = NotificationCompat.Builder(context, CHANNEL_UPDATES)
+            .setContentTitle("UhmK POS ${update.versionName} is available")
+            .setContentText("Tap to review and install the update.")
+            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setOnlyAlertOnce(true)
+            .setAutoCancel(true)
+            .setContentIntent(openAppIntent(context, MainActivity.DESTINATION_SETTINGS))
+            .build()
+        return runCatching {
+            NotificationManagerCompat.from(context).notify(UPDATE_AVAILABLE_ID, notification)
+        }.isSuccess
+    }
+
+    fun clearUpdateAvailable(context: Context) {
+        NotificationManagerCompat.from(context).cancel(UPDATE_AVAILABLE_ID)
+    }
+
     /** Raises a notification for every notice stored after [since]. */
     suspend fun notifyNewSince(context: Context, container: AppContainer, since: Long) {
         val fresh = container.noticeRepository.observeAll().first()
@@ -265,6 +300,7 @@ object NoticeNotifier {
 
     private const val MISSING_COST_ID = 4810
     private const val MISSING_PIN_ID = 4811
+    private const val UPDATE_AVAILABLE_ID = 4820
 
     // Stable ids so re-running a check refreshes the existing entry instead of adding another.
     private const val ALERT_MISSING_COST = "alert-missing-cost"

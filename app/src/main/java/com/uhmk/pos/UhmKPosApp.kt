@@ -6,6 +6,7 @@ import com.uhmk.pos.core.notify.NoticeListenerService
 import com.uhmk.pos.core.notify.NoticeNotifier
 import com.uhmk.pos.core.notify.ReminderScheduler
 import com.uhmk.pos.core.sync.SyncWorker
+import com.uhmk.pos.core.update.UpdateCheckScheduler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -23,6 +24,7 @@ class UhmKPosApp : Application() {
         super.onCreate()
         container = AppContainer(this)
         NoticeNotifier.createChannels(this)
+        UpdateCheckScheduler.schedule(this)
 
         appScope.launch {
             // First launch fills the catalogue from the store spreadsheet.
