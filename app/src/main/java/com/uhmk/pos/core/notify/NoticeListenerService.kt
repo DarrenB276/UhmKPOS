@@ -115,7 +115,10 @@ class NoticeListenerService : Service() {
             .collect { sales ->
                 if (sales.isEmpty()) return@collect
                 val settings = container.settingsStore.settings.first()
-                sales.filter { it.updatedAt > cursor && it.voidedAt == null && it.returnedAt == null }
+                sales.filter {
+                    it.updatedAt > cursor && it.voidedAt == null && it.returnedAt == null &&
+                        it.source != "IMPORT"
+                }
                     .forEach { sale ->
                         if (settings.salesNotificationsEnabled) {
                             NoticeNotifier.showSale(this@NoticeListenerService, sale, settings)

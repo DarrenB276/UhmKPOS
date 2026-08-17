@@ -618,6 +618,7 @@ fun PosApp(
                     onReseed = vm::reseedCatalogue,
                     onImportInventory = vm::importInventoryCsv,
                     onImportDayTallies = vm::importDayTallyCsv,
+                    onImportSalesHistory = vm::importSalesHistoryCsv,
                     onResetSales = vm::resetAllSales,
                     onOpenStaff = { navController.navigate(Routes.STAFF) },
                     onSetPin = vm::setPin,

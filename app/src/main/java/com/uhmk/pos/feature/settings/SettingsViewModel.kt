@@ -10,6 +10,7 @@ import com.uhmk.pos.core.prefs.PinStore
 import com.uhmk.pos.core.prefs.SettingsStore
 import com.uhmk.pos.core.prefs.StoreSettings
 import com.uhmk.pos.core.notify.ReminderScheduler
+import com.uhmk.pos.core.money.Money
 import com.uhmk.pos.feature.auth.AuthService
 import com.uhmk.pos.core.repo.ItemRepository
 import com.uhmk.pos.core.repo.SaleRepository
@@ -225,6 +226,57 @@ class SettingsViewModel(
                     }
                 },
                 onFailure = { _message.value = it.message ?: "Could not import that file" },
+            )
+            busy.value = false
+        }
+    }
+
+    /** Imports the receipt export and its matching item-sales summary as one verified history set. */
+    fun importSalesHistoryCsv(uris: List<Uri>) {
+        if (busy.value) return
+        val session = state.value.session
+        if (!session.isAdmin) {
+            _message.value = "Only an admin can import sales history"
+            return
+        }
+        if (uris.size < 2) {
+            _message.value = "Select both the receipt export and item-sales summary"
+            return
+        }
+        busy.value = true
+        viewModelScope.launch {
+            runCatching {
+                val plan = itemRepository.planSalesHistoryCsv(uris)
+                val report = saleRepository.importSalesHistory(
+                    plan = plan,
+                    actorId = session.uid.ifBlank { "local-admin" },
+                    actorName = session.displayName.ifBlank { "Owner" },
+                ).getOrThrow()
+                plan to report
+            }.fold(
+                onSuccess = { (plan, report) ->
+                    // A receipt-level import supersedes aggregate tally receipts in the same
+                    // period. Same-id history receipts are overwritten by sync and need no delete.
+                    val cloudTallies = syncManager.deleteRemoteTalliesInRange(
+                        plan.firstSoldAt,
+                        plan.lastSoldAt,
+                    )
+                    val cloudStale = syncManager.deleteRemoteSales(report.remoteDeleteIds)
+                    val sync = if (syncManager.isCloudEnabled) syncManager.syncAll() else null
+                    _message.value = buildString {
+                        append("Imported ${report.completedReceipts} receipts")
+                        append(" · ${report.unitsWritten} sold units")
+                        append(" · ${Money.format(plan.netAfterRefundsCentavos)} net after refunds")
+                        if (report.voidedReceipts > 0) append(" · ${report.voidedReceipts} voided")
+                        if (report.returnedReceipts > 0) append(" · ${report.returnedReceipts} returned")
+                        if (report.replacedReceipts > 0) append(" · ${report.replacedReceipts} replaced")
+                        if (report.removedTallies > 0) append(" · ${report.removedTallies} old tally receipt(s) removed")
+                        if (cloudTallies.isFailure || cloudStale.isFailure || sync?.isFailure == true) {
+                            append(" · saved here; cloud sync will retry")
+                        }
+                    }
+                },
+                onFailure = { _message.value = it.message ?: "Could not import sales history" },
             )
             busy.value = false
         }

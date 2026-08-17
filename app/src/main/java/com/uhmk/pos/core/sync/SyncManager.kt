@@ -115,53 +115,57 @@ class SyncManager(
 
         val sales = saleDao.dirtySales()
         if (sales.isNotEmpty()) {
-            val batch = firestore.batch()
-            sales.forEach { sale ->
-                val lines = saleDao.linesForSale(sale.id).map { line ->
-                    mapOf(
-                        "id" to line.id,
-                        "itemId" to line.itemId,
-                        "itemName" to line.itemName,
-                        "category" to line.category,
-                        "tier" to line.tier.name,
-                        "unitPriceCentavos" to line.unitPriceCentavos,
-                        "unitCostCentavos" to line.unitCostCentavos,
-                        "costKnown" to line.costKnown,
-                        "qty" to line.qty,
-                        "discountCentavos" to line.discountCentavos,
+            // Firestore allows at most 500 writes per batch. Historical imports can contain
+            // thousands of receipts, so upload in smaller restart-safe chunks.
+            sales.chunked(400).forEach { chunk ->
+                val batch = firestore.batch()
+                chunk.forEach { sale ->
+                    val lines = saleDao.linesForSale(sale.id).map { line ->
+                        mapOf(
+                            "id" to line.id,
+                            "itemId" to line.itemId,
+                            "itemName" to line.itemName,
+                            "category" to line.category,
+                            "tier" to line.tier.name,
+                            "unitPriceCentavos" to line.unitPriceCentavos,
+                            "unitCostCentavos" to line.unitCostCentavos,
+                            "costKnown" to line.costKnown,
+                            "qty" to line.qty,
+                            "discountCentavos" to line.discountCentavos,
+                        )
+                    }
+                    batch.set(
+                        firestore.collection(SALES).document(sale.id),
+                        mapOf(
+                            "id" to sale.id,
+                            "soldAt" to sale.soldAt,
+                            "cashierId" to sale.cashierId,
+                            "cashierName" to sale.cashierName,
+                            "receiptNo" to sale.receiptNo,
+                            "deviceCode" to sale.deviceCode,
+                            "grossCentavos" to sale.grossCentavos,
+                            "discountCentavos" to sale.discountCentavos,
+                            "netCentavos" to sale.netCentavos,
+                            "costCentavos" to sale.costCentavos,
+                            "profitCentavos" to sale.profitCentavos,
+                            "unknownCostCentavos" to sale.unknownCostCentavos,
+                            "paymentMethod" to sale.paymentMethod,
+                            "tenderedCentavos" to sale.tenderedCentavos,
+                            "orderType" to sale.orderType,
+                            "orderLabel" to sale.orderLabel,
+                            "note" to sale.note,
+                            "updatedAt" to sale.updatedAt,
+                            "voidedAt" to sale.voidedAt,
+                            "returnedAt" to sale.returnedAt,
+                            "returnReason" to sale.returnReason,
+                            "source" to sale.source,
+                            "lines" to lines,
+                        ),
                     )
                 }
-                batch.set(
-                    firestore.collection(SALES).document(sale.id),
-                    mapOf(
-                        "id" to sale.id,
-                        "soldAt" to sale.soldAt,
-                        "cashierId" to sale.cashierId,
-                        "cashierName" to sale.cashierName,
-                        "receiptNo" to sale.receiptNo,
-                        "deviceCode" to sale.deviceCode,
-                        "grossCentavos" to sale.grossCentavos,
-                        "discountCentavos" to sale.discountCentavos,
-                        "netCentavos" to sale.netCentavos,
-                        "costCentavos" to sale.costCentavos,
-                        "profitCentavos" to sale.profitCentavos,
-                        "unknownCostCentavos" to sale.unknownCostCentavos,
-                        "paymentMethod" to sale.paymentMethod,
-                        "tenderedCentavos" to sale.tenderedCentavos,
-                        "orderType" to sale.orderType,
-                        "orderLabel" to sale.orderLabel,
-                        "note" to sale.note,
-                        "updatedAt" to sale.updatedAt,
-                        "voidedAt" to sale.voidedAt,
-                        "returnedAt" to sale.returnedAt,
-                        "returnReason" to sale.returnReason,
-                        "source" to sale.source,
-                        "lines" to lines,
-                    ),
-                )
+                batch.commit().await()
+                saleDao.clearDirty(chunk.map { it.id })
             }
-            batch.commit().await()
-            saleDao.clearDirty(sales.map { it.id })
         }
 
         val users = if (isAdmin) userDao.dirtyUsers() else emptyList()
@@ -285,7 +289,10 @@ class SyncManager(
                     // On first sync, the remote item snapshot already includes historical stock.
                     // Later, newly-arrived staff sales need applying because staff cannot rewrite
                     // the owner-controlled item document directly.
-                    if (since > 0) {
+                    // Only a real checkout moves inventory. Historical receipts and aggregate day
+                    // tallies already happened before import and must stay non-stock-moving on
+                    // every device, not only on the phone that created the import.
+                    if (since > 0 && remote.sale.source == "POS") {
                         when {
                             local == null && remote.sale.voidedAt == null &&
                                 remote.sale.returnedAt == null ->

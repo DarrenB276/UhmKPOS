@@ -10,6 +10,8 @@ import com.uhmk.pos.core.export.DayTallyCsvImporter
 import com.uhmk.pos.core.export.DayTallyImportPlan
 import com.uhmk.pos.core.export.InventoryCsvImporter
 import com.uhmk.pos.core.export.InventoryImportPlan
+import com.uhmk.pos.core.export.SalesHistoryCsvImporter
+import com.uhmk.pos.core.export.SalesHistoryImportPlan
 import com.uhmk.pos.core.image.ItemImages
 import com.uhmk.pos.core.sync.ItemSyncPolicy
 import kotlinx.coroutines.Dispatchers
@@ -92,6 +94,17 @@ class ItemRepository(
                 ?: error("Could not open that file")
         }
         return DayTallyCsvImporter.plan(content, dao.getAll())
+    }
+
+    /** Reads the paired receipt and item-summary exports without modifying inventory. */
+    suspend fun planSalesHistoryCsv(sources: List<Uri>): SalesHistoryImportPlan {
+        val contents = withContext(Dispatchers.IO) {
+            sources.map { source ->
+                context.contentResolver.openInputStream(source)?.bufferedReader()?.use { it.readText() }
+                    ?: error("Could not open one of the selected files")
+            }
+        }
+        return SalesHistoryCsvImporter.plan(contents, dao.getAll())
     }
 
     /**

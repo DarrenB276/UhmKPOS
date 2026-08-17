@@ -98,6 +98,7 @@ fun SettingsScreen(
     onReseed: () -> Unit,
     onImportInventory: (android.net.Uri) -> Unit,
     onImportDayTallies: (android.net.Uri) -> Unit,
+    onImportSalesHistory: (List<android.net.Uri>) -> Unit,
     onResetSales: () -> Unit,
     onOpenStaff: () -> Unit,
     onSetPin: (String, String) -> Unit,
@@ -130,6 +131,9 @@ fun SettingsScreen(
     val tallyPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri -> uri?.let(onImportDayTallies) }
+    val historyPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris -> if (uris.isNotEmpty()) onImportSalesHistory(uris) }
 
     LazyColumn(
         contentPadding = PaddingValues(
@@ -525,6 +529,22 @@ fun SettingsScreen(
                 onClick = { confirmReseed = true },
             )
             if (state.session.isAdmin) {
+                ActionRow(
+                    icon = { Icon(Icons.Default.UploadFile, contentDescription = null) },
+                    title = "Import sales history",
+                    subtitle = "Select the receipt export and item-sales summary together. " +
+                        "Receipts fill history and dated product totals fill Day Tally.",
+                    onClick = {
+                        historyPicker.launch(
+                            arrayOf(
+                                "text/csv",
+                                "text/comma-separated-values",
+                                "text/plain",
+                                "application/vnd.ms-excel",
+                            )
+                        )
+                    },
+                )
                 ActionRow(
                     icon = { Icon(Icons.Default.CalendarMonth, contentDescription = null) },
                     title = "Import day tallies",

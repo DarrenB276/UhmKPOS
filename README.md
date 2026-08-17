@@ -1,6 +1,13 @@
 # UhmK POS
 
-Current build: **2.6.4**
+Current build: **2.6.5**
+
+Version 2.6.5 adds a verified sales-history import. Select a receipt export and its matching
+item-sales summary together; the app checks that product quantities, sales, discounts and refunds
+reconcile before writing anything. Completed sales populate dated reports and Day Tally, while
+cancelled and refunded receipts remain visible with their correct status. The import is repeat-safe,
+does not change current stock, replaces older aggregate tallies in the same period, and uploads
+large histories to Firebase in restart-safe batches without generating sale alerts.
 
 Version 2.6.4 reworks the docked Current sale panel around what a cashier actually touches. Order
 type, customer, payment method, discount and note now fold behind a **Tap to edit payment** handle,
@@ -132,7 +139,9 @@ hours and posts one concise notification for each new version.
 **CSV export and restore** — From Reports: profit by item, sales by category, active sale lines,
 complete order and receipt history (including voids/returns), or full inventory. Files open in Excel
 or Google Sheets. Admins can restore a Full inventory CSV from Settings → Data; stable item IDs are
-used when available and “not set” cells never clear a completed cost.
+used when available and “not set” cells never clear a completed cost. **Import sales history** accepts
+a paired receipt export and item-sales summary, verifies their totals, and rebuilds both dated Day
+Tally quantities and receipt history without deducting old sales from today's stock.
 
 ---
 

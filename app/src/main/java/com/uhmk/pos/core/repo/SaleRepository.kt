@@ -15,6 +15,8 @@ import com.uhmk.pos.core.db.SaleEntity
 import com.uhmk.pos.core.db.SaleLineEntity
 import com.uhmk.pos.core.db.SaleWithLines
 import com.uhmk.pos.core.db.TierSalesRow
+import com.uhmk.pos.core.export.ImportedReceiptStatus
+import com.uhmk.pos.core.export.SalesHistoryImportPlan
 import com.uhmk.pos.core.model.CartLine
 import com.uhmk.pos.core.model.OrderType
 import com.uhmk.pos.core.model.PriceTier
@@ -22,6 +24,8 @@ import com.uhmk.pos.core.money.distribute
 import com.uhmk.pos.core.time.DateRange
 import kotlinx.coroutines.flow.Flow
 import java.time.LocalDate
+import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
 
 /** One row of an imported day tally, already resolved to a catalogue item and a price tier. */
@@ -41,6 +45,18 @@ data class TallyImportReport(
     /** Tallies that already existed on those dates and were replaced; their cloud copies must go too. */
     val replacedSaleIds: List<String>,
     val unmatchedItemIds: List<String>,
+)
+
+data class SalesHistoryImportReport(
+    val completedReceipts: Int,
+    val voidedReceipts: Int,
+    val returnedReceipts: Int,
+    val linesWritten: Int,
+    val unitsWritten: Int,
+    val replacedReceipts: Int,
+    val removedTallies: Int,
+    /** Only stale/imported aggregate documents need deleting; same-id receipts are overwritten. */
+    val remoteDeleteIds: List<String>,
 )
 
 class SaleRepository(
@@ -318,6 +334,113 @@ class SaleRepository(
             unitsWritten = unitsWritten,
             replacedSaleIds = replaced,
             unmatchedItemIds = missing.toList(),
+        )
+    }
+
+    /**
+     * Replaces imported receipt history inside the export's exact time span.
+     *
+     * Native checkout sales are never touched. Aggregate TALLY receipts in the same span are
+     * removed because the dated receipt lines supersede them; keeping both would double Day Tally.
+     * Inventory is deliberately untouched because these products left the shelf in the past.
+     */
+    suspend fun importSalesHistory(
+        plan: SalesHistoryImportPlan,
+        actorId: String,
+        actorName: String,
+    ): Result<SalesHistoryImportReport> = runCatching {
+        require(plan.receipts.isNotEmpty()) { "There are no receipts to import." }
+        val from = plan.firstSoldAt
+        val to = plan.lastSoldAt
+        val previousImports = saleDao.salesOfSourceInRange("IMPORT", from, to)
+        val previousTallies = saleDao.salesOfSourceInRange("TALLY", from, to)
+        val incomingIds = plan.receipts.mapTo(hashSetOf()) { it.id }
+        val staleImportIds = previousImports.map { it.id }.filterNot(incomingIds::contains)
+        val remoteDeleteIds = (staleImportIds + previousTallies.map { it.id }).distinct()
+        val now = System.currentTimeMillis()
+
+        val sales = plan.receipts.map { receipt ->
+            val lineCost = receipt.lines.filter { it.costKnown }.sumOf { it.unitCostCentavos }
+            val lineProfit = receipt.lines.filter { it.costKnown }
+                .sumOf { it.unitPriceCentavos - it.discountCentavos - it.unitCostCentavos }
+            val unknownNet = receipt.lines.filterNot { it.costKnown }
+                .sumOf { it.unitPriceCentavos - it.discountCentavos }
+            SaleEntity(
+                id = receipt.id,
+                soldAt = receipt.soldAt,
+                cashierId = actorId,
+                cashierName = receipt.cashierName.ifBlank { actorName.ifBlank { "Owner" } },
+                receiptNo = receipt.receiptNo,
+                deviceCode = receipt.deviceCode,
+                grossCentavos = receipt.grossCentavos,
+                discountCentavos = receipt.discountCentavos,
+                netCentavos = receipt.netCentavos,
+                costCentavos = lineCost,
+                profitCentavos = lineProfit,
+                unknownCostCentavos = unknownNet,
+                paymentMethod = receipt.paymentMethod,
+                tenderedCentavos = receipt.tenderedCentavos,
+                orderType = receipt.orderType.name,
+                orderLabel = receipt.orderLabel,
+                note = "Imported sales history",
+                updatedAt = now,
+                voidedAt = receipt.soldAt.takeIf { receipt.status == ImportedReceiptStatus.VOIDED },
+                returnedAt = receipt.soldAt.takeIf { receipt.status == ImportedReceiptStatus.RETURNED },
+                returnReason = if (receipt.status == ImportedReceiptStatus.RETURNED) "Imported refund" else "",
+                source = "IMPORT",
+                dirty = true,
+            )
+        }
+        val lines = plan.receipts.flatMap { receipt ->
+            receipt.lines.mapIndexed { index, line ->
+                SaleLineEntity(
+                    id = "${receipt.id}-line-$index",
+                    saleId = receipt.id,
+                    itemId = line.itemId,
+                    itemName = line.itemName,
+                    category = line.category,
+                    tier = line.tier,
+                    unitPriceCentavos = line.unitPriceCentavos,
+                    unitCostCentavos = line.unitCostCentavos,
+                    costKnown = line.costKnown,
+                    qty = 1,
+                    discountCentavos = line.discountCentavos,
+                )
+            }
+        }
+
+        db.withTransaction {
+            val replaceIds = (previousImports.map { it.id } + previousTallies.map { it.id }).distinct()
+            replaceIds.chunked(400).forEach { ids -> if (ids.isNotEmpty()) saleDao.deleteSales(ids) }
+            saleDao.insertSales(sales)
+            saleDao.insertLines(lines)
+            val businessDate = Instant.ofEpochMilli(plan.lastSoldAt).atZone(ZoneId.systemDefault()).toLocalDate()
+            db.auditLogDao().upsert(
+                AuditLogEntity(
+                    id = "aud-" + UUID.randomUUID(),
+                    action = "SALES_HISTORY_IMPORTED",
+                    entityId = "${plan.firstSoldAt}-${plan.lastSoldAt}",
+                    businessDateEpochDay = businessDate.toEpochDay(),
+                    actorId = actorId,
+                    actorName = actorName,
+                    occurredAt = now,
+                    beforeSummary = "${previousImports.size} imported receipts, ${previousTallies.size} day tallies",
+                    afterSummary = "${plan.completedReceipts} sales, ${plan.voidedReceipts} voided, " +
+                        "${plan.returnedReceipts} returned, ${plan.unitsSold} sold units",
+                    dirty = true,
+                )
+            )
+        }
+
+        SalesHistoryImportReport(
+            completedReceipts = plan.completedReceipts,
+            voidedReceipts = plan.voidedReceipts,
+            returnedReceipts = plan.returnedReceipts,
+            linesWritten = lines.size,
+            unitsWritten = plan.unitsSold,
+            replacedReceipts = previousImports.count { it.id in incomingIds },
+            removedTallies = previousTallies.size,
+            remoteDeleteIds = remoteDeleteIds,
         )
     }
 

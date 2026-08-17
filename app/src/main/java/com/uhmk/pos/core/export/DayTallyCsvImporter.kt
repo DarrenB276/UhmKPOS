@@ -43,7 +43,7 @@ object DayTallyCsvImporter {
     )
 
     fun plan(content: String, catalogue: List<ItemEntity>): DayTallyImportPlan {
-        val table = CsvTable.parse(content.removePrefix("﻿"))
+        val table = CsvTable.parse(content.removePrefix("\uFEFF"))
             .filter { row -> row.any(String::isNotBlank) }
         require(table.isNotEmpty()) { "The file is empty" }
 
