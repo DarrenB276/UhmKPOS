@@ -6,14 +6,20 @@ import com.uhmk.pos.core.db.CatalogueSeeder
 import com.uhmk.pos.core.db.CategoryCount
 import com.uhmk.pos.core.db.ItemDao
 import com.uhmk.pos.core.db.ItemEntity
+import com.uhmk.pos.core.export.DayTallyCsvImporter
+import com.uhmk.pos.core.export.DayTallyImportPlan
 import com.uhmk.pos.core.export.InventoryCsvImporter
 import com.uhmk.pos.core.export.InventoryImportPlan
+import com.uhmk.pos.core.image.ItemImages
 import com.uhmk.pos.core.sync.ItemSyncPolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
+
+/** A photo copied into app storage, with the fingerprint that identifies it across devices. */
+data class StoredImage(val path: String, val hash: String)
 
 class ItemRepository(
     private val context: Context,
@@ -75,6 +81,20 @@ class ItemRepository(
     }
 
     /**
+     * Reads a day-tally file and resolves every row against the live catalogue.
+     *
+     * Only reads — writing the tallies is the sale repository's job, because replacing a date is a
+     * change to trading history rather than to the product list.
+     */
+    suspend fun planDayTallyCsv(source: Uri): DayTallyImportPlan {
+        val content = withContext(Dispatchers.IO) {
+            context.contentResolver.openInputStream(source)?.bufferedReader()?.use { it.readText() }
+                ?: error("Could not open that file")
+        }
+        return DayTallyCsvImporter.plan(content, dao.getAll())
+    }
+
+    /**
      * Seeds the catalogue if it is empty. [force] re-applies the shipped catalogue over existing
      * rows, which is what "Reload built-in price list" in Settings uses.
      */
@@ -87,6 +107,7 @@ class ItemRepository(
                 val old = dao.getById(fresh.id) ?: return@map fresh
                 fresh.copy(
                     imagePath = old.imagePath,
+                    imageHash = old.imageHash,
                     stockQty = old.stockQty,
                     category = old.category,
                     trackStock = old.trackStock,
@@ -115,7 +136,7 @@ class ItemRepository(
      * Photo Picker hands back a short-lived permission grant on the original Uri, so the bytes
      * have to be copied now or the image breaks the next time the app opens.
      */
-    suspend fun storeImage(source: Uri, itemId: String): String? = withContext(Dispatchers.IO) {
+    suspend fun storeImage(source: Uri, itemId: String): StoredImage? = withContext(Dispatchers.IO) {
         runCatching {
             val dir = File(context.filesDir, "item_images").apply { mkdirs() }
             val target = File(dir, "$itemId-${UUID.randomUUID().toString().take(8)}.jpg")
@@ -125,17 +146,22 @@ class ItemRepository(
 
             dao.getById(itemId)?.imagePath
                 ?.takeIf { it != target.absolutePath }
-                ?.let { old -> runCatching { File(old).delete() } }
+                ?.let { old -> ItemImages.delete(old) }
 
-            target.absolutePath
+            // Fingerprinting the shared thumbnail rather than the original: two devices must agree
+            // on whether they hold the same photo, and only the thumbnail ever travels.
+            val hash = ItemImages.encodeThumbnail(target.absolutePath)
+                ?.let(ItemImages::hash)
+                ?: return@runCatching null
+
+            StoredImage(path = target.absolutePath, hash = hash)
         }.getOrNull()
     }
 
     suspend fun clearImage(itemId: String) {
         val item = dao.getById(itemId) ?: return
-        item.imagePath?.let { runCatching { File(it).delete() } }
-        // Photos are device-private on the free Firebase plan and must not dirty the cloud row.
-        dao.upsert(item.copy(imagePath = null))
+        ItemImages.delete(item.imagePath)
+        save(item.copy(imagePath = null, imageHash = ""))
     }
 
     fun newItemTemplate(): ItemEntity = ItemEntity(

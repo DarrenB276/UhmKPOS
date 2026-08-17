@@ -77,6 +77,7 @@ fun appViewModelFactory(container: AppContainer): ViewModelProvider.Factory = vi
             saleRepository = container.saleRepository,
             settingsStore = container.settingsStore,
             sessionStore = container.sessionStore,
+            syncManager = container.syncManager,
             appContext = container.context,
         )
     }

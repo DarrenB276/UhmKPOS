@@ -118,6 +118,7 @@ class ReceiptViewModel(
     private val saleRepository: SaleRepository,
     private val settingsStore: SettingsStore,
     private val sessionStore: SessionStore,
+    private val syncManager: com.uhmk.pos.core.sync.SyncManager,
     private val appContext: Context,
 ) : ViewModel() {
 
@@ -185,6 +186,34 @@ class ReceiptViewModel(
                 },
                 onFailure = { _message.value = it.message ?: "Could not void that sale" },
             )
+        }
+    }
+
+    /**
+     * Erases a receipt outright, locally and in the cloud.
+     *
+     * Different from voiding: a void keeps the receipt as a record of a mistake, which is what an
+     * audit trail wants. This is for entries that never represented trade at all — test orders from
+     * setting the till up — where leaving them in history is just noise. Stock is left where it is,
+     * because counts have usually been corrected by hand since.
+     */
+    fun deleteSale(onDone: () -> Unit) {
+        val sale = state.value.sale?.sale ?: return
+        if (!state.value.session.isAdmin) {
+            _message.value = "Only an admin can delete a receipt"
+            return
+        }
+        viewModelScope.launch {
+            val removed = saleRepository.deleteSales(listOf(sale.id))
+            val cloud = syncManager.deleteRemoteSales(listOf(sale.id))
+            _message.value = when {
+                removed == 0 -> "That receipt was already gone"
+                cloud.isFailure && syncManager.isCloudEnabled ->
+                    "Receipt ${sale.receiptLabel} deleted here, but the cloud copy could not be " +
+                        "reached. Delete it again while online or it may sync back."
+                else -> "Receipt ${sale.receiptLabel} deleted"
+            }
+            onDone()
         }
     }
 

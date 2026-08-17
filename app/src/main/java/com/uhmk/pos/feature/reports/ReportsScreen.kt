@@ -67,7 +67,7 @@ private enum class ReportChartType(val label: String) {
 }
 
 private enum class ReportChartMetric(val label: String) {
-    SALES("Sales"), TAKE_HOME("Take-home")
+    SALES("Sales"), TAKE_HOME("Gross profit")
 }
 
 private enum class ReportChartGroup(val label: String) {
@@ -127,7 +127,7 @@ fun ReportsScreen(
         item {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                 StatCard(
-                    label = "Take-home profit",
+                    label = "Gross profit",
                     value = Money.format(state.totals.profit, currency),
                     caption = state.totals.marginPercent?.let { "%.1f%% margin".format(it) }
                         ?: "Nothing sold in this period",
@@ -137,13 +137,13 @@ fun ReportsScreen(
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     StatCard(
-                        label = "Revenue",
+                        label = "Net sales",
                         value = Money.format(state.totals.net, currency),
                         caption = "what customers paid",
                         modifier = Modifier.weight(1f),
                     )
                     StatCard(
-                        label = "Capital",
+                        label = "Cost of goods",
                         value = Money.format(state.totals.cost, currency),
                         caption = "goes back to restock",
                         modifier = Modifier.weight(1f),
@@ -350,17 +350,17 @@ private fun androidx.compose.foundation.lazy.LazyListScope.itemsSection(
                 Spacer(Modifier.height(10.dp))
                 Row(Modifier.fillMaxWidth()) {
                     ReportAmount(
-                        label = "Revenue",
+                        label = "Net sales",
                         value = Money.format(row.net, currency),
                         modifier = Modifier.weight(1f),
                     )
                     ReportAmount(
-                        label = "Capital",
+                        label = "Cost of goods",
                         value = if (row.costKnown) Money.format(row.cost, currency) else "Cost missing",
                         modifier = Modifier.weight(1f),
                     )
                     ReportAmount(
-                        label = "Take-home",
+                        label = "Gross profit",
                         value = if (row.costKnown) Money.format(row.profit, currency) else "Unknown",
                         modifier = Modifier.weight(1f),
                         highlight = row.costKnown,
@@ -392,7 +392,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.itemsSection(
                     )
                     Text(
                         "${Money.format(state.totals.net, currency)} sales · " +
-                            "${Money.format(state.totals.profit, currency)} take-home",
+                            "${Money.format(state.totals.profit, currency)} gross profit",
                         fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.End,
                     )
@@ -444,7 +444,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.employeesSection(
             title = row.cashierName,
             value = Money.format(row.net, currency),
             caption = "${row.saleCount} receipts · ${row.itemsSold} units · " +
-                "take-home ${Money.format(row.profit, currency)}",
+                "gross profit ${Money.format(row.profit, currency)}",
             share = share,
         )
     }
@@ -468,7 +468,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.paymentsSection(
             title = row.paymentMethod,
             value = Money.format(row.net, currency),
             caption = "${row.saleCount} receipts · ${row.itemsSold} units · " +
-                "take-home ${Money.format(row.profit, currency)}",
+                "gross profit ${Money.format(row.profit, currency)}",
             share = share,
         )
     }
@@ -492,7 +492,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.orderTypesSection(
             title = OrderType.from(row.orderType).label,
             value = Money.format(row.net, currency),
             caption = "${row.saleCount} receipts · ${row.itemsSold} units · " +
-                "take-home ${Money.format(row.profit, currency)}",
+                "gross profit ${Money.format(row.profit, currency)}",
             share = share,
         )
     }
@@ -561,7 +561,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.categoriesSection(
                 Text(Money.format(row.net, currency), fontWeight = FontWeight.Bold)
             }
             Text(
-                "${row.qtySold} units · take-home ${Money.format(row.profit, currency)}",
+                "${row.qtySold} units · gross profit ${Money.format(row.profit, currency)}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -614,7 +614,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.tiersSection(
                     Text(Money.format(row.net, currency), fontWeight = FontWeight.Bold)
                 }
                 Text(
-                    "${row.qtySold} units · take-home ${Money.format(row.profit, currency)}",
+                    "${row.qtySold} units · gross profit ${Money.format(row.profit, currency)}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

@@ -19,6 +19,7 @@ import com.uhmk.pos.core.db.NoticeEntity
 import com.uhmk.pos.core.db.SaleEntity
 import com.uhmk.pos.core.db.SaleLineEntity
 import com.uhmk.pos.core.db.UserEntity
+import com.uhmk.pos.core.image.ItemImages
 import com.uhmk.pos.core.model.PriceTier
 import com.uhmk.pos.core.model.UserRole
 import com.uhmk.pos.core.prefs.SessionStore
@@ -219,6 +220,11 @@ class SyncManager(
             )
         }
         val catalogueSnapshot = catalogueQuery.get(Source.SERVER).await()
+        // The thumbnail is kept beside the parsed item rather than on it: it is a payload to write
+        // to disk once, not a column worth carrying around in memory or storing in Room.
+        val remoteThumbs = catalogueSnapshot.documents.associate { doc ->
+            doc.id to (doc.getString("imageThumb").orEmpty())
+        }
         val remoteItems = catalogueSnapshot.documents.mapNotNull { it.data?.toItem() }
         catalogueSnapshot.documents.mapNotNull { it.getTimestamp("serverUpdatedAt") }
             .maxOrNull()
@@ -235,13 +241,16 @@ class SyncManager(
             val local = itemDao.getById(remote.id)
             val merged = when {
                 local == null -> remote
-                !isAdmin -> remote.copy(imagePath = local.imagePath)
+                !isAdmin -> remote.copy(imagePath = local.imagePath, imageHash = local.imageHash)
                 else -> ItemSyncPolicy.mergeRemote(remote, local).also { result ->
                     if (result.hadVersionConflict) itemConflicts++
                     if (result.protectedKnownCost) protectedCosts++
                 }.item
             }
-            merged.takeIf { it != local }
+            // A photo only lands when the incoming fingerprint differs from the one already held,
+            // so an unchanged catalogue never rewrites eighty-five image files.
+            val withPhoto = applyRemotePhoto(merged, local, remote, remoteThumbs[remote.id].orEmpty())
+            withPhoto.takeIf { it != local }
         }
         if (freshItems.isNotEmpty()) itemDao.upsertAll(freshItems)
 
@@ -294,6 +303,24 @@ class SyncManager(
                     if (remote.lines.isNotEmpty()) saleDao.insertLines(remote.lines)
                 }
             }
+        }
+
+        // Sales removed elsewhere. A cursor pull cannot notice an absent document, so the deletions
+        // are read from their own collection and applied here. Stock is deliberately left alone:
+        // the same reasoning as a local reset — counts have been edited by hand since.
+        // Guarded: a project whose rules predate this collection denies the read, and losing the
+        // whole catalogue and sales pull over an optional extra would be a poor trade.
+        if (isAdmin) {
+            runCatching {
+                firestore.collection(SALE_DELETIONS)
+                    .whereGreaterThan("deletedAt", since)
+                    .get().await()
+                    .documents.mapNotNull { it.getString("saleId") }
+            }.onSuccess { removedIds ->
+                if (removedIds.isNotEmpty()) {
+                    removedIds.chunked(500).forEach { saleDao.deleteSales(it) }
+                }
+            }.onFailure { Log.w(TAG, "Could not read sale deletions: ${it.message}") }
         }
 
         // The account list is intentionally small. Pull it in full so an admin can always target
@@ -349,6 +376,37 @@ class SyncManager(
         )
     }
 
+    /**
+     * Writes an incoming product photo to disk, or clears one that has been removed.
+     *
+     * A device that changed the photo itself keeps its own: that edit has not been pushed yet, and
+     * overwriting it here would silently discard the owner's work. Everything else follows the
+     * cloud, which is what makes a photo taken on one phone appear on the others.
+     */
+    private fun applyRemotePhoto(
+        merged: ItemEntity,
+        local: ItemEntity?,
+        remote: ItemEntity,
+        thumb: String,
+    ): ItemEntity {
+        val locallyChanged = local != null &&
+            ItemSyncPolicy.IMAGE in ItemSyncPolicy.decode(merged.pendingFields)
+        if (locallyChanged) return merged
+        if (merged.imageHash == local?.imageHash && local?.imagePath != null) return merged
+
+        return when {
+            remote.imageHash.isBlank() || thumb.isBlank() -> {
+                ItemImages.delete(local?.imagePath)
+                merged.copy(imagePath = null, imageHash = "")
+            }
+            else -> {
+                val path = ItemImages.writeThumbnail(context, merged.id, thumb)
+                if (path == null) merged.copy(imageHash = local?.imageHash.orEmpty())
+                else merged.copy(imagePath = path, imageHash = remote.imageHash)
+            }
+        }
+    }
+
     private data class ItemPushOutcome(
         val item: ItemEntity,
         val pushed: Boolean,
@@ -369,6 +427,12 @@ class SyncManager(
         val auditRef = firestore.collection(AUDIT_LOGS).document(UUID.randomUUID().toString())
         val occurredAt = System.currentTimeMillis()
         val businessDate = LocalDate.now().toEpochDay()
+
+        // Encoded up front: the transaction body can be retried, and re-reading and re-compressing
+        // a photo on every attempt would be wasteful. Null when the photo has been removed.
+        val encodedThumb = local.imagePath
+            ?.takeIf { local.imageHash.isNotBlank() }
+            ?.let { ItemImages.encodeThumbnail(it) }
 
         return firestore.runTransaction { transaction ->
             val snapshot = transaction.get(itemRef)
@@ -420,6 +484,13 @@ class SyncManager(
                 put("lastChangedFields", changedFields.toList())
                 put("updatedByUid", actorId)
                 put("updatedByName", actorName)
+                if (ItemSyncPolicy.IMAGE in changedFields) {
+                    // An empty string clears the photo everywhere rather than leaving the old one.
+                    // Hash and thumbnail are written together so a device can never be told a photo
+                    // exists and then find nothing to show.
+                    put("imageThumb", encodedThumb.orEmpty())
+                    put(ItemSyncPolicy.IMAGE, if (encodedThumb == null) "" else updated.imageHash)
+                }
             }
             transaction.set(itemRef, patch, SetOptions.merge())
 
@@ -552,16 +623,88 @@ class SyncManager(
     suspend fun deleteAllRemoteSales(): Result<Int> {
         if (!isCloudEnabled) return Result.success(0)
         return runCatching {
-            var removed = 0
-            val docs = firestore.collection(SALES).get().await().documents
-            docs.chunked(400).forEach { chunk ->
-                val batch = firestore.batch()
-                chunk.forEach { batch.delete(it.reference) }
-                batch.commit().await()
-                removed += chunk.size
-            }
-            removed
+            val ids = firestore.collection(SALES).get().await().documents.map { it.id }
+            removeRemoteSales(ids)
         }
+    }
+
+    /**
+     * Clears the cloud's day tallies across a span of dates.
+     *
+     * Deleting only the tallies this device happens to know about is not enough: a tally recorded
+     * on another phone, or one this device has never pulled, would survive the import and the date
+     * would then be counted twice. The date span is authoritative, so the cloud is asked directly.
+     *
+     * Filtering by source in memory is deliberate — combining an equality filter with a range
+     * filter would need a composite index deployed alongside the app, and a range on `soldAt`
+     * alone is served by Firestore's automatic single-field index. Only tallies are removed;
+     * ordinary receipts in the same span are left alone.
+     */
+    suspend fun deleteRemoteTalliesInRange(from: Long, to: Long): Result<Int> {
+        if (!isCloudEnabled) return Result.success(0)
+        return runCatching {
+            // Source.SERVER is deliberate, for the same reason the catalogue pull uses it: the
+            // local cache can be missing documents written by another device, and a short read
+            // here would leave those tallies behind to double-count the date.
+            val ids = firestore.collection(SALES)
+                .whereGreaterThanOrEqualTo("soldAt", from)
+                .whereLessThanOrEqualTo("soldAt", to)
+                .get(Source.SERVER).await()
+                .documents
+                .filter { it.getString("source") == "TALLY" }
+                .map { it.id }
+            removeRemoteSales(ids)
+        }
+    }
+
+    /**
+     * Deletes specific sales from the cloud.
+     *
+     * Used by the day-tally import, which replaces a date rather than adding to it, and by removing
+     * a single receipt. Only the ids handed in are touched.
+     */
+    suspend fun deleteRemoteSales(ids: List<String>): Result<Int> {
+        if (!isCloudEnabled || ids.isEmpty()) return Result.success(0)
+        return runCatching { removeRemoteSales(ids) }
+    }
+
+    /**
+     * Removes the sale documents and leaves a note saying they are gone.
+     *
+     * The pull is a cursor query — `updatedAt > since` — so it can see new and changed documents but
+     * never absent ones. Without the note a sale deleted here would live on forever on any other
+     * admin device, which is how a "cleared" figure comes back next week. Batched because Firestore
+     * caps a write batch at 500 operations, and each id costs two.
+     */
+    private suspend fun removeRemoteSales(ids: List<String>): Int {
+        val now = System.currentTimeMillis()
+        var removed = 0
+        ids.chunked(400).forEach { chunk ->
+            val batch = firestore.batch()
+            chunk.forEach { batch.delete(firestore.collection(SALES).document(it)) }
+            batch.commit().await()
+            removed += chunk.size
+        }
+
+        // Recorded separately, and allowed to fail. A project whose rules predate this collection
+        // rejects the write, and the deletion above is the part that actually matters — bundling
+        // them into one batch would mean an old rules file silently blocked the delete as well.
+        runCatching {
+            ids.chunked(400).forEach { chunk ->
+                val batch = firestore.batch()
+                chunk.forEach { id ->
+                    batch.set(
+                        firestore.collection(SALE_DELETIONS).document(id),
+                        mapOf("saleId" to id, "deletedAt" to now),
+                    )
+                }
+                batch.commit().await()
+            }
+        }.onFailure {
+            Log.w(TAG, "Sale deletions recorded locally only: ${it.message}. " +
+                "Publish the saleDeletions rule so other admin devices see the removal.")
+        }
+        return removed
     }
 
     suspend fun registerFcmToken(uid: String, token: String) {
@@ -577,6 +720,7 @@ class SyncManager(
         const val TAG = "SyncManager"
         const val ITEMS = "items"
         const val SALES = "sales"
+        const val SALE_DELETIONS = "saleDeletions"
         const val USERS = "users"
         const val NOTICES = "notices"
         const val AUDIT_LOGS = "auditLogs"
@@ -624,8 +768,9 @@ private fun Map<String, Any?>.toItem(): ItemEntity? {
         unitsPerBox = int("unitsPerBox", 1),
         stockQty = int("stockQty", 0),
         lowStockAt = int("lowStockAt", 5),
-        // Photos stay on the device that took them; Cloud Storage is not part of the free tier plan.
+        // The path is device-local; the caller writes the thumbnail and fills this in.
         imagePath = null,
+        imageHash = this["imageHash"] as? String ?: "",
         active = this["active"] as? Boolean ?: true,
         sortIndex = int("sortIndex", 0),
         updatedAt = long("updatedAt"),

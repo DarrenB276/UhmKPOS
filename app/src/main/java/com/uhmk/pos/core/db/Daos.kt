@@ -351,6 +351,13 @@ interface SaleDao {
     @Query("DELETE FROM sales WHERE id = :id")
     suspend fun deleteSale(id: String)
 
+    /** Every sale of one kind on a day, whatever its status — the set a re-import has to replace. */
+    @Query("SELECT * FROM sales WHERE source = :source AND soldAt BETWEEN :from AND :to")
+    suspend fun salesOfSourceInRange(source: String, from: Long, to: Long): List<SaleEntity>
+
+    @Query("DELETE FROM sales WHERE id IN (:ids)")
+    suspend fun deleteSales(ids: List<String>)
+
     @Query("SELECT COUNT(*) FROM sales")
     suspend fun countSales(): Int
 

@@ -15,6 +15,7 @@ import com.uhmk.pos.core.repo.ItemRepository
 import com.uhmk.pos.core.repo.SaleRepository
 import com.uhmk.pos.core.sync.SyncManager
 import com.uhmk.pos.core.sync.SyncStore
+import com.uhmk.pos.core.time.DateRange
 import com.uhmk.pos.core.update.AppUpdateInfo
 import com.uhmk.pos.core.update.InstallLaunchResult
 import com.uhmk.pos.core.update.UpdateManager
@@ -161,6 +162,69 @@ class SettingsViewModel(
                     }
                 },
                 onFailure = { _message.value = it.message ?: "Could not restore inventory CSV" },
+            )
+            busy.value = false
+        }
+    }
+
+    /**
+     * Loads day tallies from a file, replacing whatever was on those dates.
+     *
+     * The replaced tallies are deleted from the cloud as well. Without that the next pull would
+     * bring the old figures straight back and the date would be counted twice.
+     */
+    fun importDayTallyCsv(uri: Uri) {
+        if (busy.value) return
+        val session = state.value.session
+        if (!session.isAdmin) {
+            _message.value = "Only an admin can import day tallies"
+            return
+        }
+        busy.value = true
+        viewModelScope.launch {
+            runCatching {
+                val plan = itemRepository.planDayTallyCsv(uri)
+                require(plan.dates.isNotEmpty()) { "No usable rows in that file" }
+                val report = saleRepository.importDayTallies(
+                    lines = plan.lines,
+                    dates = plan.dates,
+                    actorId = session.uid.ifBlank { "local-admin" },
+                    actorName = session.displayName.ifBlank { "Owner" },
+                ).getOrThrow()
+                plan to report
+            }.fold(
+                onSuccess = { (plan, report) ->
+                    // Clear the cloud's tallies for the whole span first, then push the new ones.
+                    // Done in that order so a tally this device never pulled cannot survive the
+                    // import and double-count the date.
+                    val cloud = if (plan.dates.isNotEmpty()) {
+                        syncManager.deleteRemoteTalliesInRange(
+                            DateRange.startOfDay(plan.dates.first()),
+                            DateRange.endOfDay(plan.dates.last()),
+                        )
+                    } else null
+                    val sync = if (syncManager.isCloudEnabled) syncManager.syncAll() else null
+                    _message.value = buildString {
+                        append("Imported ${report.datesWritten} day")
+                        if (report.datesWritten != 1) append("s")
+                        append(" · ${report.linesWritten} lines · ${report.unitsWritten} units")
+                        if (report.datesCleared > 0) {
+                            append(" · ${report.datesCleared} date(s) cleared as no-sale")
+                        }
+                        if (report.replacedSaleIds.isNotEmpty()) {
+                            append(" · replaced ${report.replacedSaleIds.size} existing tally receipt(s)")
+                        }
+                        if (plan.unmatchedNames.isNotEmpty()) {
+                            append(" · ${plan.unmatchedNames.size} product(s) not found: ")
+                            append(plan.unmatchedNames.take(3).joinToString())
+                        }
+                        if (plan.invalidRows > 0) append(" · ${plan.invalidRows} unreadable rows skipped")
+                        if (cloud?.isFailure == true || sync?.isFailure == true) {
+                            append(" · saved here; cloud sync will retry")
+                        }
+                    }
+                },
+                onFailure = { _message.value = it.message ?: "Could not import that file" },
             )
             busy.value = false
         }

@@ -56,10 +56,12 @@ fun ReceiptScreen(
     onExport: () -> Unit,
     onVoid: () -> Unit,
     onReturn: (String) -> Unit,
+    onDelete: () -> Unit,
     onBack: () -> Unit,
 ) {
     var confirmVoid by remember { mutableStateOf(false) }
     var confirmReturn by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
     var returnReason by remember { mutableStateOf("") }
     val sale = state.sale
     val currency = state.settings.currencySymbol
@@ -150,9 +152,9 @@ fun ReceiptScreen(
                             Text("Owner view", fontWeight = FontWeight.Bold)
                             Spacer(Modifier.height(8.dp))
                             Line("Order status", sale.sale.status.label, bold = true)
-                            Line("Restocking cost", Money.format(sale.sale.costCentavos, currency))
+                            Line("Cost of goods", Money.format(sale.sale.costCentavos, currency))
                             Line(
-                                "Take-home profit",
+                                "Gross profit",
                                 Money.format(sale.sale.profitCentavos, currency),
                                 bold = true,
                             )
@@ -182,6 +184,13 @@ fun ReceiptScreen(
                                     ) { Text("Void sale") }
                                 }
                             }
+                            Spacer(Modifier.height(6.dp))
+                            TextButton(onClick = { confirmDelete = true }) {
+                                Text(
+                                    "Erase this receipt",
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
                         }
                     }
                 }
@@ -208,6 +217,28 @@ fun ReceiptScreen(
                 }) { Text("Void sale") }
             },
             dismissButton = { TextButton(onClick = { confirmVoid = false }) { Text("Cancel") } },
+        )
+    }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Erase this receipt?") },
+            text = {
+                Text(
+                    "The receipt is removed completely, here and on every other device — no " +
+                        "record of it is kept. Use this only for a test order. To cancel a real " +
+                        "sale, void or return it instead so the history still shows what happened. " +
+                        "Stock counts are left as they are."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = false
+                    onDelete()
+                }) { Text("Erase receipt") }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
         )
     }
 

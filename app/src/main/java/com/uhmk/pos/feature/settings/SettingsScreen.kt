@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Edit
@@ -96,6 +97,7 @@ fun SettingsScreen(
     onSyncNow: () -> Unit,
     onReseed: () -> Unit,
     onImportInventory: (android.net.Uri) -> Unit,
+    onImportDayTallies: (android.net.Uri) -> Unit,
     onResetSales: () -> Unit,
     onOpenStaff: () -> Unit,
     onSetPin: (String, String) -> Unit,
@@ -125,6 +127,9 @@ fun SettingsScreen(
     val inventoryPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri -> uri?.let(onImportInventory) }
+    val tallyPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let(onImportDayTallies) }
 
     LazyColumn(
         contentPadding = PaddingValues(
@@ -485,7 +490,7 @@ fun SettingsScreen(
             item {
             ToggleRow(
                 title = "Let staff see profit",
-                subtitle = "When off, only admins see margins and take-home figures",
+                subtitle = "When off, only admins see margins and gross profit figures",
                 checked = s.showProfitToStaff,
                 onCheckedChange = { v -> onUpdate { it.copy(showProfitToStaff = v) } },
                 modifier = Modifier.padding(horizontal = 16.dp),
@@ -520,6 +525,22 @@ fun SettingsScreen(
                 onClick = { confirmReseed = true },
             )
             if (state.session.isAdmin) {
+                ActionRow(
+                    icon = { Icon(Icons.Default.CalendarMonth, contentDescription = null) },
+                    title = "Import day tallies",
+                    subtitle = "Loads past days from a file of date, product and quantity. Each " +
+                        "date in the file replaces its tally; other dates are untouched.",
+                    onClick = {
+                        tallyPicker.launch(
+                            arrayOf(
+                                "text/csv",
+                                "text/comma-separated-values",
+                                "text/plain",
+                                "application/vnd.ms-excel",
+                            )
+                        )
+                    },
+                )
                 ActionRow(
                     icon = { Icon(Icons.Default.DeleteForever, contentDescription = null) },
                     title = "Clear all sales",

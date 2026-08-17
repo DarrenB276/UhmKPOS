@@ -58,3 +58,36 @@ fun productTileMinWidth(): Dp = when (rememberWindowSize()) {
     PosWindowSize.MEDIUM -> 140.dp
     PosWindowSize.EXPANDED -> 160.dp
 }
+
+/**
+ * Width of the docked Current sale panel.
+ *
+ * A fixed 360dp looked right on a small tablet and cramped on a large one, where product names and
+ * money were wrapping while the grid beside it had width to spare. Taking a share of the screen
+ * instead lets it grow, and the clamp stops it from squeezing the product grid on a small tablet or
+ * stretching into a mostly-empty column on a desk monitor.
+ */
+@Composable
+@ReadOnlyComposable
+fun cartPanelWidth(): Dp {
+    val width = LocalConfiguration.current.screenWidthDp
+    return (width * 0.36f).dp.coerceIn(340.dp, 480.dp)
+}
+
+/**
+ * Width cap for the pop-up Current sale sheet.
+ *
+ * Material's default bottom-sheet cap is 640dp, which on a tablet puts the order list and the
+ * payment fields into two narrow columns with wrapped labels. The sheet is the whole checkout, so
+ * it is allowed most of the screen.
+ */
+@Composable
+@ReadOnlyComposable
+fun cartSheetMaxWidth(): Dp {
+    val width = LocalConfiguration.current.screenWidthDp
+    return when (rememberWindowSize()) {
+        PosWindowSize.COMPACT -> Dp.Unspecified
+        PosWindowSize.MEDIUM -> (width * 0.94f).dp
+        PosWindowSize.EXPANDED -> (width * 0.88f).dp.coerceAtMost(1000.dp)
+    }
+}

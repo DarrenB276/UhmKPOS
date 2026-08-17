@@ -132,43 +132,7 @@ object InventoryCsvImporter {
         else -> null
     }
 
-    private fun normaliseHeader(value: String): String = value.trim().lowercase()
-        .replace(Regex("[^a-z0-9]"), "")
+    private fun normaliseHeader(value: String): String = CsvTable.normaliseHeader(value)
 
-    /** Small RFC-4180 parser: quoted commas, quotes and line breaks all survive round trips. */
-    private fun parseCsv(text: String): List<List<String>> {
-        val rows = mutableListOf<List<String>>()
-        var row = mutableListOf<String>()
-        val cell = StringBuilder()
-        var quoted = false
-        var index = 0
-        while (index < text.length) {
-            val char = text[index]
-            when {
-                quoted && char == '"' && index + 1 < text.length && text[index + 1] == '"' -> {
-                    cell.append('"')
-                    index++
-                }
-                char == '"' -> quoted = !quoted
-                !quoted && char == ',' -> {
-                    row += cell.toString()
-                    cell.clear()
-                }
-                !quoted && (char == '\n' || char == '\r') -> {
-                    if (char == '\r' && index + 1 < text.length && text[index + 1] == '\n') index++
-                    row += cell.toString()
-                    cell.clear()
-                    rows += row
-                    row = mutableListOf()
-                }
-                else -> cell.append(char)
-            }
-            index++
-        }
-        if (cell.isNotEmpty() || row.isNotEmpty()) {
-            row += cell.toString()
-            rows += row
-        }
-        return rows
-    }
+    private fun parseCsv(text: String): List<List<String>> = CsvTable.parse(text)
 }

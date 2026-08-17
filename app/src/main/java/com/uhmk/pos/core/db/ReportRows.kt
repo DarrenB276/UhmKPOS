@@ -8,7 +8,7 @@ import androidx.room.Relation
  *
  * [profit] counts only lines whose cost was known. Anything sold without a cost on file is kept
  * apart in [unknownNet] rather than folded in, because counting it would report the whole selling
- * price as take-home.
+ * price as gross profit.
  */
 data class RangeTotals(
     val saleCount: Int = 0,

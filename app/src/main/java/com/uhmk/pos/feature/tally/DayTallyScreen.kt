@@ -395,10 +395,10 @@ private fun TallyTotalBar(state: DayTallyUiState, currency: String) {
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Text("Capital ${Money.format(state.capital, currency)}",
+                    Text("Cost of goods ${Money.format(state.capital, currency)}",
                         style = MaterialTheme.typography.labelMedium)
                     Text(
-                        "Take-home ${Money.format(state.profit, currency)}",
+                        "Gross profit ${Money.format(state.profit, currency)}",
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Bold,
                     )

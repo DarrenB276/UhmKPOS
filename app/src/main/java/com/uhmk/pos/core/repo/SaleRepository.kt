@@ -6,6 +6,7 @@ import com.uhmk.pos.core.db.AuditLogEntity
 import com.uhmk.pos.core.db.CategorySalesRow
 import com.uhmk.pos.core.db.DailyPoint
 import com.uhmk.pos.core.db.EmployeeSalesRow
+import com.uhmk.pos.core.db.ItemEntity
 import com.uhmk.pos.core.db.ItemSalesRow
 import com.uhmk.pos.core.db.OrderTypeSalesRow
 import com.uhmk.pos.core.db.PaymentSalesRow
@@ -16,9 +17,31 @@ import com.uhmk.pos.core.db.SaleWithLines
 import com.uhmk.pos.core.db.TierSalesRow
 import com.uhmk.pos.core.model.CartLine
 import com.uhmk.pos.core.model.OrderType
+import com.uhmk.pos.core.model.PriceTier
 import com.uhmk.pos.core.money.distribute
+import com.uhmk.pos.core.time.DateRange
 import kotlinx.coroutines.flow.Flow
+import java.time.LocalDate
 import java.util.UUID
+
+/** One row of an imported day tally, already resolved to a catalogue item and a price tier. */
+data class TallyImportLine(
+    val date: LocalDate,
+    val itemId: String,
+    val tier: PriceTier,
+    val qty: Int,
+)
+
+data class TallyImportReport(
+    val datesWritten: Int,
+    /** Dates the file listed as having no sales, whose old tally was removed. */
+    val datesCleared: Int,
+    val linesWritten: Int,
+    val unitsWritten: Int,
+    /** Tallies that already existed on those dates and were replaced; their cloud copies must go too. */
+    val replacedSaleIds: List<String>,
+    val unmatchedItemIds: List<String>,
+)
 
 class SaleRepository(
     private val db: AppDatabase,
@@ -77,6 +100,11 @@ class SaleRepository(
         soldAt: Long = System.currentTimeMillis(),
         source: String = "POS",
         deviceCode: String = "",
+        /**
+         * False when the units left the shelf before the app knew about them — an imported
+         * historical day. Deducting those again would charge today's stock for last week's sales.
+         */
+        adjustStock: Boolean = true,
     ): Result<String> {
         if (lines.isEmpty()) return Result.failure(IllegalArgumentException("Cart is empty"))
         if (lines.any { it.qty <= 0 }) {
@@ -134,7 +162,9 @@ class SaleRepository(
                 saleDao.insertSale(sale)
                 saleDao.insertLines(lineEntities)
                 // decrementStock is a no-op for service items, which never run out.
-                lines.forEach { itemDao.decrementStock(it.item.id, it.qty, soldAt) }
+                if (adjustStock) {
+                    lines.forEach { itemDao.decrementStock(it.item.id, it.qty, soldAt) }
+                }
             }
             saleId
         }
@@ -188,6 +218,114 @@ class SaleRepository(
             )
             newId
         }
+    }
+
+    /**
+     * Replaces the day tally on each imported date with the rows supplied.
+     *
+     * Replace, not merge: a day's figures come from one source, and adding a second tally beside an
+     * existing one would double that date in every report. Dates absent from the file are left
+     * exactly as they are, so this can be run for one week without disturbing another.
+     *
+     * Prices and costs are read from the catalogue as it stands now and then snapshotted onto the
+     * lines, the same as a live sale — later price changes cannot move an imported day.
+     */
+    suspend fun importDayTallies(
+        lines: List<TallyImportLine>,
+        /** Every date the file covers. Dates with no rows are cleared rather than left stale. */
+        dates: List<LocalDate>,
+        actorId: String,
+        actorName: String,
+    ): Result<TallyImportReport> = runCatching {
+        val byDate = lines.filter { it.qty > 0 }.groupBy { it.date }
+        val itemCache = mutableMapOf<String, ItemEntity?>()
+        val replaced = mutableListOf<String>()
+        val missing = sortedSetOf<String>()
+        var datesWritten = 0
+        var datesCleared = 0
+        var linesWritten = 0
+        var unitsWritten = 0
+
+        for (date in (dates + byDate.keys).distinct().sorted()) {
+            val dayRows = byDate[date].orEmpty()
+            val cartLines = dayRows.mapNotNull { row ->
+                val item = itemCache.getOrPut(row.itemId) { itemDao.getById(row.itemId) }
+                if (item == null) {
+                    missing += row.itemId
+                    null
+                } else {
+                    CartLine(item = item, tier = row.tier, qty = row.qty)
+                }
+            }
+
+            val from = DateRange.startOfDay(date)
+            val to = DateRange.endOfDay(date)
+            val previous = saleDao.salesOfSourceInRange("TALLY", from, to).map { it.id }
+
+            // A day the file says had no sales: clear it and write nothing.
+            if (cartLines.isEmpty()) {
+                if (previous.isNotEmpty()) {
+                    db.withTransaction { saleDao.deleteSales(previous) }
+                    replaced += previous
+                    datesCleared++
+                }
+                continue
+            }
+
+            db.withTransaction {
+                if (previous.isNotEmpty()) saleDao.deleteSales(previous)
+                recordSale(
+                    lines = cartLines,
+                    discountCentavos = 0,
+                    cashierId = actorId,
+                    cashierName = actorName,
+                    note = "Day tally",
+                    orderLabel = "Day tally",
+                    // Midday, matching a hand-entered tally, so the row cannot drift across a
+                    // date boundary when a report is read in a different time zone.
+                    soldAt = from + 12 * 60 * 60 * 1000L,
+                    source = "TALLY",
+                    adjustStock = false,
+                ).getOrThrow()
+
+                db.auditLogDao().upsert(
+                    AuditLogEntity(
+                        id = "aud-" + UUID.randomUUID(),
+                        action = if (previous.isEmpty()) "TALLY_IMPORTED" else "TALLY_REPLACED_BY_IMPORT",
+                        entityId = date.toString(),
+                        businessDateEpochDay = date.toEpochDay(),
+                        actorId = actorId,
+                        actorName = actorName,
+                        occurredAt = System.currentTimeMillis(),
+                        beforeSummary = if (previous.isEmpty()) "no tally on file"
+                        else "${previous.size} tally receipt(s) removed",
+                        afterSummary = "${cartLines.size} lines, ${cartLines.sumOf { it.qty }} units",
+                        dirty = true,
+                    )
+                )
+            }
+
+            replaced += previous
+            datesWritten++
+            linesWritten += cartLines.size
+            unitsWritten += cartLines.sumOf { it.qty }
+        }
+
+        TallyImportReport(
+            datesWritten = datesWritten,
+            datesCleared = datesCleared,
+            linesWritten = linesWritten,
+            unitsWritten = unitsWritten,
+            replacedSaleIds = replaced,
+            unmatchedItemIds = missing.toList(),
+        )
+    }
+
+    /** Removes specific sales outright. Used to clear test receipts without touching real trade. */
+    suspend fun deleteSales(ids: List<String>): Int {
+        if (ids.isEmpty()) return 0
+        db.withTransaction { ids.chunked(500).forEach { saleDao.deleteSales(it) } }
+        return ids.size
     }
 
     /**

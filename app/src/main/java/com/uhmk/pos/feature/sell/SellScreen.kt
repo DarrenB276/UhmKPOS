@@ -45,6 +45,8 @@ import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.ConfirmationNumber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -90,6 +92,8 @@ import com.uhmk.pos.core.model.OrderType
 import com.uhmk.pos.core.model.PriceTier
 import com.uhmk.pos.core.money.Money
 import com.uhmk.pos.core.ui.PosWindowSize
+import com.uhmk.pos.core.ui.cartPanelWidth
+import com.uhmk.pos.core.ui.cartSheetMaxWidth
 import com.uhmk.pos.core.ui.productTileMinWidth
 import com.uhmk.pos.core.ui.rememberWindowSize
 import com.uhmk.pos.core.ui.components.AutoShrinkText
@@ -310,10 +314,16 @@ fun SellScreen(
         val dockedPanel: @Composable () -> Unit = {
             CartPanel(
                 state = state,
+                side = dockedSide,
                 modifier = Modifier
-                    .width(360.dp)
+                    .width(cartPanelWidth())
                     .padding(top = contentPadding.calculateTopPadding())
-                    .padding(bottom = inner.calculateBottomPadding()),
+                    // The panel does not scroll as a whole, so it has to clear the navigation bar
+                    // itself or Complete sale ends up underneath it.
+                    .padding(
+                        bottom = contentPadding.calculateBottomPadding() +
+                            inner.calculateBottomPadding()
+                    ),
                 onQty = onQty,
                 onTier = onTier,
                 onDiscount = onDiscount,
@@ -349,6 +359,8 @@ fun SellScreen(
         ModalBottomSheet(
             onDismissRequest = { showCart = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            // Material caps a sheet at 640dp, which is where the tablet checkout went cramped.
+            sheetMaxWidth = cartSheetMaxWidth(),
         ) {
             CartSheet(
                 state = state,
@@ -866,7 +878,7 @@ private fun CartBar(
                 Text("$itemCount item${if (itemCount == 1) "" else "s"}", fontWeight = FontWeight.SemiBold)
                 if (showProfit) {
                     Text(
-                        "Take-home " + Money.format(profit, currency),
+                        "Gross profit " + Money.format(profit, currency),
                         style = MaterialTheme.typography.labelSmall,
                     )
                 }
@@ -1018,6 +1030,7 @@ private fun CartSheet(
 @Composable
 private fun CartPanel(
     state: SellUiState,
+    side: CartPanelPosition,
     modifier: Modifier = Modifier,
     onQty: (String, Int) -> Unit,
     onTier: (String, PriceTier) -> Unit,
@@ -1041,70 +1054,122 @@ private fun CartPanel(
     var noteText by remember(state.cart.note) { mutableStateOf(state.cart.note) }
     var orderLabelText by remember(state.cart.orderLabel) { mutableStateOf(state.cart.orderLabel) }
 
-    Column(
-        modifier
-            .fillMaxHeight()
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
-            .padding(horizontal = 12.dp)
-    ) {
-        Spacer(Modifier.height(8.dp))
-        CartHeader(state, onTier)
-        Spacer(Modifier.height(8.dp))
+    // Folded to begin with: most sales are rung up without touching any of these, and the order
+    // list gets the height instead.
+    var detailsExpanded by remember { mutableStateOf(false) }
 
-        if (state.cart.isEmpty) {
-            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                Text(
-                    "Tap a product to start the order.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+    // The outer edge is the screen and the inner edge butts against the divider and the grid, so
+    // they do not want the same padding: the inner side needs more room to read as a separate pane.
+    val outerPadding = 12.dp
+    val innerPadding = 18.dp
+    val startPadding = if (side == CartPanelPosition.LEFT) outerPadding else innerPadding
+    val endPadding = if (side == CartPanelPosition.LEFT) innerPadding else outerPadding
+
+    Surface(
+        modifier = modifier.fillMaxHeight(),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 1.dp,
+    ) {
+        Column(Modifier.padding(start = startPadding, end = endPadding)) {
+            Spacer(Modifier.height(8.dp))
+            CartHeader(state, onTier, compact = true)
+            Spacer(Modifier.height(4.dp))
+
+            if (state.cart.isEmpty) {
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    Text(
+                        "Tap a product to start the order.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                // The order gets the larger share: it is what the cashier and the customer are
+                // both looking at, and the payment fields below are mostly set-and-forget.
+                OrderLines(
+                    state, currency, rememberScrollState(),
+                    Modifier.weight(if (detailsExpanded) 1f else 1.6f),
+                    onQty, onTier, compact = true,
                 )
             }
-        } else {
-            OrderLines(state, currency, rememberScrollState(), Modifier.weight(1f), onQty, onTier)
-        }
 
-        HorizontalDivider()
-        Column(
-            Modifier
-                .heightIn(max = 460.dp)
-                .verticalScroll(rememberScrollState())
-        ) {
-            Spacer(Modifier.height(8.dp))
-            PaymentFields(
+            HorizontalDivider()
+            // Everything except taking payment folds away. Order type, customer, method, discount
+            // and note are set once or not at all; cash, the figures and Complete sale are touched
+            // on every sale, so they stay put.
+            //
+            // Weighted rather than a fixed block: on a short panel a fixed height pushed the
+            // checkout row off the bottom the moment this opened. Sharing the flexible space with
+            // the order means both shrink and Complete sale never leaves the screen.
+            if (detailsExpanded) {
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Spacer(Modifier.height(8.dp))
+                    PaymentFields(
+                        state = state,
+                        currency = currency,
+                        discountText = discountText,
+                        tenderedText = tenderedText,
+                        noteText = noteText,
+                        orderLabelText = orderLabelText,
+                        onDiscountText = { discountText = it; onDiscount(Money.parse(it) ?: 0L) },
+                        onTenderedText = { tenderedText = it; onTendered(Money.parse(it) ?: 0L) },
+                        onExactCash = {
+                            tenderedText = Money.formatAmount(state.cart.net)
+                            onTendered(state.cart.net)
+                        },
+                        onNoteText = { noteText = it; onNote(it) },
+                        onOrderLabelText = { orderLabelText = it; onOrderLabel(it) },
+                        onPaymentMethod = onPaymentMethod,
+                        onOrderType = onOrderType,
+                        compact = true,
+                        includeCash = false,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                }
+            }
+
+            TotalsBlock(
                 state = state,
                 currency = currency,
-                discountText = discountText,
-                tenderedText = tenderedText,
-                noteText = noteText,
-                orderLabelText = orderLabelText,
-                onDiscountText = { discountText = it; onDiscount(Money.parse(it) ?: 0L) },
-                onTenderedText = { tenderedText = it; onTendered(Money.parse(it) ?: 0L) },
-                onExactCash = {
-                    tenderedText = Money.formatAmount(state.cart.net)
-                    onTendered(state.cart.net)
+                collapsible = true,
+                expanded = detailsExpanded,
+                onToggle = { detailsExpanded = !detailsExpanded },
+                belowHandle = {
+                    CashRow(
+                        state = state,
+                        currency = currency,
+                        tenderedText = tenderedText,
+                        onTenderedText = { tenderedText = it; onTendered(Money.parse(it) ?: 0L) },
+                        onExactCash = {
+                            tenderedText = Money.formatAmount(state.cart.net)
+                            onTendered(state.cart.net)
+                        },
+                    )
+                    Spacer(Modifier.height(6.dp))
                 },
-                onNoteText = { noteText = it; onNote(it) },
-                onOrderLabelText = { orderLabelText = it; onOrderLabel(it) },
-                onPaymentMethod = onPaymentMethod,
-                onOrderType = onOrderType,
             )
-            Spacer(Modifier.height(8.dp))
-            TotalsBlock(state, currency, collapsible = false, expanded = true, onToggle = {})
-            Spacer(Modifier.height(12.dp))
-            CartActions(state, onClearCart, onHoldTicket, onCheckout)
+            Spacer(Modifier.height(10.dp))
+            CartActions(state, onClearCart, onHoldTicket, onCheckout, singleRow = true)
             Spacer(Modifier.height(16.dp))
         }
     }
 }
 
 @Composable
-private fun CartHeader(state: SellUiState, onTier: (String, PriceTier) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("Current sale", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-        SingleChoiceSegmentedButtonRow(Modifier.weight(1.35f)) {
+private fun CartHeader(
+    state: SellUiState,
+    onTier: (String, PriceTier) -> Unit,
+    compact: Boolean = false,
+) {
+    val tierSelector: @Composable (Modifier) -> Unit = { modifier ->
+        SingleChoiceSegmentedButtonRow(modifier) {
             listOf(PriceTier.REGULAR, PriceTier.STUDENT).forEachIndexed { index, tier ->
                 SegmentedButton(
-                    selected = state.cart.lines.all { it.tier == tier },
+                    selected = state.cart.lines.isNotEmpty() && state.cart.lines.all { it.tier == tier },
                     onClick = { state.cart.lines.forEach { onTier(it.item.id, tier) } },
                     shape = SegmentedButtonDefaults.itemShape(index, 2),
                 ) {
@@ -1117,6 +1182,23 @@ private fun CartHeader(state: SellUiState, onTier: (String, PriceTier) -> Unit) 
             }
         }
     }
+
+    if (compact) {
+        // On one line the title and both tier buttons fight over a narrow panel and every label
+        // truncates. Two lines keeps all three readable.
+        Text("Current sale", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(6.dp))
+        tierSelector(Modifier.fillMaxWidth())
+    } else {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Current sale",
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.weight(1f),
+            )
+            tierSelector(Modifier.weight(1.35f))
+        }
+    }
 }
 
 @Composable
@@ -1127,6 +1209,7 @@ private fun OrderLines(
     modifier: Modifier = Modifier,
     onQty: (String, Int) -> Unit,
     onTier: (String, PriceTier) -> Unit,
+    compact: Boolean = false,
 ) {
     Column(modifier.verticalScroll(scrollState)) {
         state.cart.lines.forEach { line ->
@@ -1135,6 +1218,7 @@ private fun OrderLines(
                 currency = currency,
                 studentLabel = state.settings.studentLabel,
                 regularLabel = state.settings.regularLabel,
+                compact = compact,
                 onQty = { onQty(line.item.id, it) },
                 onTier = { onTier(line.item.id, it) },
             )
@@ -1159,11 +1243,19 @@ private fun PaymentFields(
     onOrderLabelText: (String) -> Unit,
     onPaymentMethod: (String) -> Unit,
     onOrderType: (OrderType) -> Unit,
+    compact: Boolean = false,
+    /**
+     * False when the cash field is pinned elsewhere.
+     *
+     * On the docked panel the cash box and its change line stay on screen while everything else
+     * folds away — taking payment is the one step that happens on every single sale.
+     */
+    includeCash: Boolean = true,
 ) {
-    val change = state.cart.tendered - state.cart.net
-
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        SingleChoiceSegmentedButtonRow(Modifier.weight(1f)) {
+    // Side by side, each of these gets half of a narrow panel and the labels wrap. Stacking them
+    // costs one row of height and gives both their full width back.
+    val orderTypeRow: @Composable (Modifier) -> Unit = { modifier ->
+        SingleChoiceSegmentedButtonRow(modifier) {
             listOf(OrderType.DINE_IN, OrderType.TAKEOUT).forEachIndexed { index, type ->
                 SegmentedButton(
                     selected = state.cart.orderType == type,
@@ -1172,13 +1264,26 @@ private fun PaymentFields(
                 ) { Text(type.label, style = MaterialTheme.typography.labelSmall) }
             }
         }
+    }
+    val orderLabelField: @Composable (Modifier) -> Unit = { modifier ->
         OutlinedTextField(
             value = orderLabelText,
             onValueChange = onOrderLabelText,
             label = { Text(if (state.cart.orderType == OrderType.DINE_IN) "Table/guest" else "Customer") },
             singleLine = true,
-            modifier = Modifier.weight(1f),
+            modifier = modifier,
         )
+    }
+
+    if (compact) {
+        orderTypeRow(Modifier.fillMaxWidth())
+        Spacer(Modifier.height(6.dp))
+        orderLabelField(Modifier.fillMaxWidth())
+    } else {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            orderTypeRow(Modifier.weight(1f))
+            orderLabelField(Modifier.weight(1f))
+        }
     }
 
     Spacer(Modifier.height(6.dp))
@@ -1193,48 +1298,90 @@ private fun PaymentFields(
         modifier = Modifier.fillMaxWidth(),
     )
 
-    if (state.cart.paymentMethod == "Cash") {
-        Spacer(Modifier.height(6.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = tenderedText,
-                onValueChange = { onTenderedText(it.filter { c -> c.isDigit() || c == '.' }) },
-                label = { Text("Cash received") },
-                prefix = { Text(currency) },
-                singleLine = true,
-                modifier = Modifier.weight(1f),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            )
-            TextButton(onClick = onExactCash) { Text("Exact") }
-        }
-        if (tenderedText.isNotBlank()) {
-            Text(
-                if (change >= 0) "Change ${Money.format(change, currency)}"
-                else "Short by ${Money.format(-change, currency)}",
-                style = MaterialTheme.typography.labelSmall,
-                color = if (change >= 0) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error,
-            )
-        }
+    if (includeCash) {
+        CashRow(
+            state = state,
+            currency = currency,
+            tenderedText = tenderedText,
+            onTenderedText = onTenderedText,
+            onExactCash = onExactCash,
+        )
     }
 
     Spacer(Modifier.height(6.dp))
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    val discountField: @Composable (Modifier) -> Unit = { modifier ->
         OutlinedTextField(
             value = discountText,
             onValueChange = { onDiscountText(it.filter { c -> c.isDigit() || c == '.' }) },
             label = { Text("Discount") },
             prefix = { Text(currency) },
             singleLine = true,
-            modifier = Modifier.weight(1f),
+            modifier = modifier,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
         )
+    }
+    val noteField: @Composable (Modifier) -> Unit = { modifier ->
         OutlinedTextField(
             value = noteText,
             onValueChange = onNoteText,
             label = { Text("Order note") },
             singleLine = true,
-            modifier = Modifier.weight(1f),
+            modifier = modifier,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+        )
+    }
+
+    if (compact) {
+        discountField(Modifier.fillMaxWidth())
+        Spacer(Modifier.height(6.dp))
+        noteField(Modifier.fillMaxWidth())
+    } else {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            discountField(Modifier.weight(1f))
+            noteField(Modifier.weight(1f))
+        }
+    }
+}
+
+/**
+ * Cash received, its Exact shortcut and the change owed.
+ *
+ * Only meaningful when the sale is being paid in cash; any other method renders nothing, so a
+ * caller can place this unconditionally.
+ */
+@Composable
+private fun CashRow(
+    state: SellUiState,
+    currency: String,
+    tenderedText: String,
+    onTenderedText: (String) -> Unit,
+    onExactCash: () -> Unit,
+) {
+    if (state.cart.paymentMethod != "Cash") return
+    val change = state.cart.tendered - state.cart.net
+
+    Spacer(Modifier.height(6.dp))
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        OutlinedTextField(
+            value = tenderedText,
+            onValueChange = { onTenderedText(it.filter { c -> c.isDigit() || c == '.' }) },
+            label = { Text("Cash received") },
+            prefix = { Text(currency) },
+            singleLine = true,
+            modifier = Modifier.weight(1f),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+        )
+        TextButton(onClick = onExactCash) { Text("Exact") }
+    }
+    if (tenderedText.isNotBlank()) {
+        Text(
+            if (change >= 0) "Change ${Money.format(change, currency)}"
+            else "Short by ${Money.format(-change, currency)}",
+            style = MaterialTheme.typography.labelSmall,
+            color = if (change >= 0) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error,
         )
     }
 }
@@ -1252,18 +1399,29 @@ private fun TotalsBlock(
     collapsible: Boolean,
     expanded: Boolean,
     onToggle: () -> Unit,
+    /**
+     * Sits between the fold handle and the figures, outside the tap target.
+     *
+     * The docked panel puts the cash box here. It has to stay reachable, so it must not inherit
+     * the clickable that folds the payment fields — typing an amount would otherwise close them.
+     */
+    belowHandle: @Composable () -> Unit = {},
 ) {
     val arrow by animateFloatAsState(if (expanded) 180f else 0f, label = "totalsArrow")
 
     Column(
         Modifier
             .fillMaxWidth()
-            .then(if (collapsible) Modifier.clickable(onClick = onToggle) else Modifier)
             .animateContentSize()
             .padding(top = 6.dp)
     ) {
         if (collapsible) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onToggle),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
                     if (expanded) "Payment details" else "Tap to edit payment",
                     style = MaterialTheme.typography.labelMedium,
@@ -1293,14 +1451,20 @@ private fun TotalsBlock(
             }
         }
 
-        SummaryRow("Subtotal", state.cart.gross, currency)
-        if (state.cart.effectiveDiscount > 0) {
-            SummaryRow("Discount", -state.cart.effectiveDiscount, currency)
-        }
-        SummaryRow("Total", state.cart.net, currency, bold = true)
-        if (state.canSeeProfit) {
-            SummaryRow("Restocking cost", state.cart.cost, currency, muted = true)
-            SummaryRow("Take-home profit", state.cart.profit, currency, bold = true, highlight = true)
+        belowHandle()
+
+        Column(
+            if (collapsible) Modifier.clickable(onClick = onToggle) else Modifier
+        ) {
+            SummaryRow("Subtotal", state.cart.gross, currency)
+            if (state.cart.effectiveDiscount > 0) {
+                SummaryRow("Discount", -state.cart.effectiveDiscount, currency)
+            }
+            SummaryRow("Total", state.cart.net, currency, bold = true)
+            if (state.canSeeProfit) {
+                SummaryRow("Cost of goods", state.cart.cost, currency, muted = true)
+                SummaryRow("Gross profit", state.cart.profit, currency, bold = true, highlight = true)
+            }
         }
     }
 }
@@ -1311,18 +1475,90 @@ private fun CartActions(
     onClearCart: () -> Unit,
     onHoldTicket: () -> Unit,
     onCheckout: () -> Unit,
+    compact: Boolean = false,
+    /** One row, with Complete sale given most of it. Used by the docked panel. */
+    singleRow: Boolean = false,
 ) {
-    Column {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = onClearCart, modifier = Modifier.weight(1f)) {
-                Icon(Icons.Default.Delete, contentDescription = null)
-                Spacer(Modifier.width(6.dp))
-                Text("Clear")
+    val checkoutLabel = when {
+        state.checkingOut -> "Saving…"
+        state.cart.paymentMethod == "Cash" && !state.cart.canCheckout -> "Enter cash received"
+        else -> "Complete sale"
+    }
+
+    if (singleRow) {
+        Row(
+            Modifier.height(58.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedButton(
+                onClick = onClearCart,
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+                contentPadding = PaddingValues(horizontal = 4.dp),
+            ) { Text("Clear", style = MaterialTheme.typography.labelLarge, maxLines = 1) }
+            OutlinedButton(
+                onClick = onHoldTicket,
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+                contentPadding = PaddingValues(horizontal = 4.dp),
+            ) {
+                Text(
+                    if (state.activeTicketId == null) "Hold" else "Update",
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1,
+                )
             }
-            OutlinedButton(onClick = onHoldTicket, modifier = Modifier.weight(1f)) {
-                Icon(Icons.Default.ConfirmationNumber, contentDescription = null)
+            Button(
+                onClick = onCheckout,
+                modifier = Modifier.weight(2.6f).fillMaxHeight(),
+                enabled = !state.checkingOut && !state.cart.isEmpty && state.cart.canCheckout,
+                contentPadding = PaddingValues(horizontal = 8.dp),
+            ) {
+                Text(
+                    checkoutLabel,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        return
+    }
+
+    // In the docked panel the secondary actions compete with the order list for height, so they
+    // shrink; Complete sale stays full size because it is the one control that must not be missed.
+    val secondary = if (compact) Modifier.height(40.dp) else Modifier
+    val secondaryPadding = if (compact) PaddingValues(horizontal = 8.dp) else ButtonDefaults.ContentPadding
+
+    Column {
+        Row(horizontalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 12.dp)) {
+            OutlinedButton(
+                onClick = onClearCart,
+                modifier = Modifier.weight(1f).then(secondary),
+                contentPadding = secondaryPadding,
+            ) {
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = null,
+                    modifier = if (compact) Modifier.size(16.dp) else Modifier,
+                )
                 Spacer(Modifier.width(6.dp))
-                Text(if (state.activeTicketId == null) "Hold" else "Update")
+                Text("Clear", style = if (compact) MaterialTheme.typography.labelLarge else LocalTextStyle.current)
+            }
+            OutlinedButton(
+                onClick = onHoldTicket,
+                modifier = Modifier.weight(1f).then(secondary),
+                contentPadding = secondaryPadding,
+            ) {
+                Icon(
+                    Icons.Default.ConfirmationNumber,
+                    contentDescription = null,
+                    modifier = if (compact) Modifier.size(16.dp) else Modifier,
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    if (state.activeTicketId == null) "Hold" else "Update",
+                    style = if (compact) MaterialTheme.typography.labelLarge else LocalTextStyle.current,
+                )
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -1348,13 +1584,14 @@ private fun CartLineRow(
     currency: String,
     studentLabel: String,
     regularLabel: String,
+    compact: Boolean = false,
     onQty: (Int) -> Unit,
     onTier: (PriceTier) -> Unit,
 ) {
-    Column(Modifier.padding(vertical = 10.dp)) {
+    Column(Modifier.padding(vertical = if (compact) 6.dp else 10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            ItemThumbnail(line.item.name, line.item.imagePath, size = 44.dp)
-            Spacer(Modifier.width(12.dp))
+            ItemThumbnail(line.item.name, line.item.imagePath, size = if (compact) 36.dp else 44.dp)
+            Spacer(Modifier.width(if (compact) 8.dp else 12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
                     line.item.name,
@@ -1370,8 +1607,15 @@ private fun CartLineRow(
                 )
             }
             MoneyText(line.gross, currency)
-            IconButton(onClick = { onQty(0) }) {
-                Icon(Icons.Default.Delete, contentDescription = "Remove ${line.item.name}")
+            IconButton(
+                onClick = { onQty(0) },
+                modifier = if (compact) Modifier.size(32.dp) else Modifier,
+            ) {
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = "Remove ${line.item.name}",
+                    modifier = if (compact) Modifier.size(18.dp) else Modifier,
+                )
             }
         }
         Row(

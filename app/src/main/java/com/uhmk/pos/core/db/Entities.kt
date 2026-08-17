@@ -35,6 +35,13 @@ data class ItemEntity(
     /** Services (cooking fee, frying, rice) are sold without ever depleting stock. */
     val trackStock: Boolean = true,
     val imagePath: String? = null,
+    /**
+     * Fingerprint of the shared thumbnail this device holds. Empty means no photo.
+     *
+     * The path is device-local and can never be compared across phones; the hash is what tells a
+     * device whether its copy of a product photo is the current one.
+     */
+    val imageHash: String = "",
     val active: Boolean = true,
     val sortIndex: Int = 0,
     val updatedAt: Long = System.currentTimeMillis(),

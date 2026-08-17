@@ -28,6 +28,7 @@ data class ItemForm(
     val lowStockAt: String = "5",
     val trackStock: Boolean = true,
     val imagePath: String? = null,
+    val imageHash: String = "",
     val active: Boolean = true,
 ) {
     val costCentavos: Long get() = Money.parse(cost) ?: 0
@@ -102,6 +103,7 @@ class ItemEditViewModel(
                         lowStockAt = base.lowStockAt.toString(),
                         trackStock = base.trackStock,
                         imagePath = base.imagePath,
+                        imageHash = base.imageHash,
                         active = base.active,
                     )
                 },
@@ -133,11 +135,13 @@ class ItemEditViewModel(
         val id = original?.id ?: return
         viewModelScope.launch {
             val stored = repository.storeImage(uri, id)
-            if (stored != null) edit { it.copy(imagePath = stored) }
+            if (stored != null) edit { it.copy(imagePath = stored.path, imageHash = stored.hash) }
         }
     }
 
-    fun clearImage() = edit { it.copy(imagePath = null) }
+    // The hash goes too, otherwise the sync layer sees no change and the removal never leaves
+    // this device.
+    fun clearImage() = edit { it.copy(imagePath = null, imageHash = "") }
 
     fun save() {
         val base = original ?: return
@@ -162,6 +166,7 @@ class ItemEditViewModel(
                     stockQty = form.stock.toIntOrNull()?.coerceAtLeast(0) ?: 0,
                     lowStockAt = form.lowStockAt.toIntOrNull()?.coerceAtLeast(0) ?: 0,
                     imagePath = form.imagePath,
+                    imageHash = form.imageHash,
                     active = form.active,
                 )
             )

@@ -72,8 +72,8 @@ object ReceiptFormatter {
 
         if (showProfit) {
             sb.appendLine(rule())
-            sb.appendLine(pair("Capital", Money.formatAmount(s.costCentavos)))
-            sb.appendLine(pair("Take-home", Money.formatAmount(s.profitCentavos)))
+            sb.appendLine(pair("Cost of goods", Money.formatAmount(s.costCentavos)))
+            sb.appendLine(pair("Gross profit", Money.formatAmount(s.profitCentavos)))
             if (s.hasUnknownCost) {
                 sb.appendLine(pair("Cost not set", Money.formatAmount(s.unknownCostCentavos)))
             }

@@ -106,7 +106,7 @@ fun InventoryScreen(
                     )
                     if (state.canSeeProfit) {
                         StatCard(
-                            label = "Stock capital",
+                            label = "Stock value",
                             value = Money.format(state.stockCapital, currency),
                             caption = "known costs only",
                             modifier = Modifier.width(180.dp),

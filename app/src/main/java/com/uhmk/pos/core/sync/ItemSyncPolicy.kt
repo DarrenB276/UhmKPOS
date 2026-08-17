@@ -23,6 +23,9 @@ object ItemSyncPolicy {
     const val ACTIVE = "active"
     const val SORT_INDEX = "sortIndex"
 
+    /** The product photo, carried between devices as a thumbnail fingerprint. */
+    const val IMAGE = "imageHash"
+
     val ALL_FIELDS: Set<String> = linkedSetOf(
         NAME,
         CATEGORY,
@@ -38,6 +41,7 @@ object ItemSyncPolicy {
         LOW_STOCK_AT,
         ACTIVE,
         SORT_INDEX,
+        IMAGE,
     )
 
     val COST_FIELDS: Set<String> = setOf(COST, COST_KNOWN)
@@ -75,6 +79,7 @@ object ItemSyncPolicy {
             if (before.lowStockAt != after.lowStockAt) add(LOW_STOCK_AT)
             if (before.active != after.active) add(ACTIVE)
             if (before.sortIndex != after.sortIndex) add(SORT_INDEX)
+            if (before.imageHash != after.imageHash) add(IMAGE)
         }
     }
 
@@ -146,6 +151,10 @@ object ItemSyncPolicy {
         if (LOW_STOCK_AT in fields) result = result.copy(lowStockAt = source.lowStockAt)
         if (ACTIVE in fields) result = result.copy(active = source.active)
         if (SORT_INDEX in fields) result = result.copy(sortIndex = source.sortIndex)
+        if (IMAGE in fields) result = result.copy(
+            imageHash = source.imageHash,
+            imagePath = source.imagePath,
+        )
         return result
     }
 
@@ -166,5 +175,8 @@ object ItemSyncPolicy {
         if (LOW_STOCK_AT in fields) put(LOW_STOCK_AT, item.lowStockAt)
         if (ACTIVE in fields) put(ACTIVE, item.active)
         if (SORT_INDEX in fields) put(SORT_INDEX, item.sortIndex)
+        // The thumbnail itself is added by the sync layer, which can read the file. This stays
+        // pure so the conflict rules remain testable without Android.
+        if (IMAGE in fields) put(IMAGE, item.imageHash)
     }
 }

@@ -364,7 +364,7 @@ fun PosApp(
 
                     val message = when (current) {
                         is com.uhmk.pos.feature.sell.SellEvent.Completed -> {
-                            val base = "Sale saved · take-home " +
+                            val base = "Sale saved · gross profit " +
                                 com.uhmk.pos.core.money.Money.format(current.profit, settings.currencySymbol)
                             if (current.oversold.isEmpty()) base
                             else "$base · stock was short on ${current.oversold.joinToString()}"
@@ -573,6 +573,7 @@ fun PosApp(
                     onExport = vm::exportReceipt,
                     onVoid = { vm.voidSale { navController.popBackStack() } },
                     onReturn = { reason -> vm.returnSale(reason) { navController.popBackStack() } },
+                    onDelete = { vm.deleteSale { navController.popBackStack() } },
                     onBack = { navController.popBackStack() },
                 )
             }
@@ -616,6 +617,7 @@ fun PosApp(
                     onSyncNow = vm::syncNow,
                     onReseed = vm::reseedCatalogue,
                     onImportInventory = vm::importInventoryCsv,
+                    onImportDayTallies = vm::importDayTallyCsv,
                     onResetSales = vm::resetAllSales,
                     onOpenStaff = { navController.navigate(Routes.STAFF) },
                     onSetPin = vm::setPin,

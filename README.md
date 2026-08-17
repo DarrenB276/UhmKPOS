@@ -1,6 +1,26 @@
 # UhmK POS
 
-Current build: **2.6.1**
+Current build: **2.6.4**
+
+Version 2.6.4 reworks the docked Current sale panel around what a cashier actually touches. Order
+type, customer, payment method, discount and note now fold behind a **Tap to edit payment** handle,
+collapsed by default, so the order list keeps the height. Cash received and its Exact shortcut stay
+pinned above the totals no matter what, with the change owed underneath, and the folded handle
+still reports the method and change at a glance. Clear, Hold and Complete sale share one row, with
+Complete sale given most of it.
+
+Version 2.6.3 switches the app to standard retail wording, so its figures line up with any other
+back office: **Net sales**, **Cost of goods** and **Gross profit** replace Revenue, Capital and
+Take-home profit throughout the screens, the receipts and the CSV exports. Product photos now reach
+every device — a downscaled thumbnail travels inside the item record, so a photo taken by the owner
+appears on the staff phones instead of an initials tile. Settings gains **Import day tallies**, which
+loads past trading days from a `date, product, quantity` file; each date in the file replaces its
+tally, in the cloud as well as on the device, and a date listed with zero quantities is recorded as
+a day with no sales. A single receipt can now be erased outright from the receipt screen, for test
+orders that should never have been history. On tablets the passcode keypad scales with the screen
+instead of stretching into thin slabs, and the Current sale panel widens with the window, stacks its
+fields rather than halving them, and keeps the totals and Complete sale pinned above a scrolling
+order.
 
 Version 2.6.1 is a catalogue data-safety release. Starter products are no longer treated as edits,
 new devices verify and download the server catalogue before publishing anything, and admin item

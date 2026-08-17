@@ -30,8 +30,8 @@ android {
         applicationId = "com.uhmk.pos"
         minSdk = 24
         targetSdk = 36
-        versionCode = 10
-        versionName = "2.6.2"
+        versionCode = 12
+        versionName = "2.6.4"
         vectorDrawables.useSupportLibrary = true
     }
 

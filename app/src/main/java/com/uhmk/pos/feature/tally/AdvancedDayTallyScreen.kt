@@ -453,9 +453,9 @@ private fun AdvancedTallyTotalBar(state: AdvancedDayTallyUiState, currency: Stri
             if (state.canSeeProfit) {
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Capital ${Money.format(state.capital, currency)}", style = MaterialTheme.typography.labelMedium)
+                    Text("Cost of goods ${Money.format(state.capital, currency)}", style = MaterialTheme.typography.labelMedium)
                     Text(
-                        "Take-home ${Money.format(state.profit, currency)}",
+                        "Gross profit ${Money.format(state.profit, currency)}",
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Bold,
                     )
@@ -464,7 +464,7 @@ private fun AdvancedTallyTotalBar(state: AdvancedDayTallyUiState, currency: Stri
             if (state.hasUnknownCost && state.canSeeProfit) {
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "${Money.format(state.unknownRevenue, currency)} has no saved cost and is excluded from take-home.",
+                    "${Money.format(state.unknownRevenue, currency)} has no saved cost and is excluded from gross profit.",
                     style = MaterialTheme.typography.labelSmall,
                 )
             }

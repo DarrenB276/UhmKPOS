@@ -248,7 +248,7 @@ fun ItemEditScreen(
                 Column(Modifier.weight(1f)) {
                     Text("Zero-cost service", style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        "Use for a cooking/service fee whose whole price is take-home.",
+                        "Use for a cooking/service fee whose whole price is gross profit.",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

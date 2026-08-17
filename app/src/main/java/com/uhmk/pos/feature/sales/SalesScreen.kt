@@ -120,7 +120,7 @@ fun SalesScreen(
                         modifier = Modifier.weight(1f),
                     )
                     StatCard(
-                        label = "Revenue",
+                        label = "Net sales",
                         value = Money.format(state.totals.net, currency),
                         caption = state.range.label,
                         emphasis = true,
@@ -246,7 +246,7 @@ private fun SaleRow(
                 if (showProfit) {
                     Text(
                         buildString {
-                            append("Take-home ").append(Money.format(sale.profitCentavos, currency))
+                            append("Gross profit ").append(Money.format(sale.profitCentavos, currency))
                             if (sale.hasUnknownCost) append(" (+ cost not set)")
                         },
                         style = MaterialTheme.typography.labelSmall,

@@ -33,7 +33,7 @@ object CsvExporter {
                 "Receipt", "Sale ID", "Date", "Time", "Cashier", "Order type", "Order label",
                 "Item", "Category", "Price tier",
                 "Qty", "Unit price", "Unit cost", "Line total", "Line discount", "Line net",
-                "Line capital", "Line profit", "Payment", "Note",
+                "Line cost of goods", "Line gross profit", "Payment", "Note",
             )
         )
         sales.sortedBy { it.sale.soldAt }.forEach { (sale, lines) ->
@@ -68,7 +68,7 @@ object CsvExporter {
                 "Receipt", "Status", "Source", "Sale ID", "Date", "Time", "Cashier",
                 "Order type", "Order label", "Payment", "Receipt gross", "Receipt discount",
                 "Receipt total", "Tendered", "Change", "Item", "Category", "Price tier", "Qty",
-                "Unit price", "Unit cost", "Line net", "Line profit", "Order note",
+                "Unit price", "Unit cost", "Line net", "Line gross profit", "Order note",
                 "Return reason", "Voided at", "Returned at",
             )
         )
@@ -100,11 +100,11 @@ object CsvExporter {
     /** Per-item totals for a date range — the "what did each product earn me" view. */
     fun itemBreakdownCsv(rows: List<ItemSalesRow>, rangeLabel: String): String {
         val sb = StringBuilder()
-        sb.appendLine(row("Report", "Profit by item", rangeLabel))
+        sb.appendLine(row("Report", "Gross profit by item", rangeLabel))
         sb.appendLine()
         sb.appendLine(
-            row("Item", "Category", "Qty sold", "Gross", "Discount", "Revenue",
-                "Capital", "Profit", "Revenue with unknown cost")
+            row("Item", "Category", "Qty sold", "Gross", "Discount", "Net sales",
+                "Cost of goods", "Gross profit", "Net sales with unknown cost")
         )
         rows.forEach { r ->
             sb.appendLine(
@@ -136,7 +136,7 @@ object CsvExporter {
         val sb = StringBuilder()
         sb.appendLine(row("Report", "Sales by category", rangeLabel))
         sb.appendLine()
-        sb.appendLine(row("Category", "Qty sold", "Revenue", "Capital", "Profit", "Unknown cost revenue"))
+        sb.appendLine(row("Category", "Qty sold", "Net sales", "Cost of goods", "Gross profit", "Net sales with unknown cost"))
         rows.forEach { r ->
             sb.appendLine(
                 row(
@@ -156,7 +156,7 @@ object CsvExporter {
             row(
                 "Item ID", "SKU", "Item", "Category", "Unit cost", "Student price", "Regular price",
                 "Student profit", "Regular profit", "In stock", "Warn at", "Tracks stock",
-                "Box cost", "Units per box", "Stock capital", "Active",
+                "Box cost", "Units per box", "Stock value", "Active",
             )
         )
         items.forEach { i ->

@@ -63,5 +63,11 @@ service cloud.firestore {
     match /auditLogs/{logId} {
       allow read, write: if isAdmin();
     }
+
+    // Records that a sale was deleted. A cursor pull cannot see an absent document, so without
+    // these notes a sale cleared on one admin device would silently return to another.
+    match /saleDeletions/{saleId} {
+      allow read, write: if isAdmin();
+    }
   }
 }

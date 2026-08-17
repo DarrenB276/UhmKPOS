@@ -19,7 +19,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TicketEntity::class,
         TicketLineEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -72,7 +72,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         /**
          * v3 distinguishes a missing cost from a genuine zero-cost service. Without this flag a
-         * cooking fee would incorrectly show as unknown profit instead of full take-home.
+         * cooking fee would incorrectly show as unknown profit instead of full gross profit.
          */
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -220,6 +220,20 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v11 lets product photos reach the other devices.
+         *
+         * Photos used to stay on the phone that picked them, so staff saw initials tiles for every
+         * product the owner had photographed. Items now carry the fingerprint of the thumbnail the
+         * device holds. Existing rows start blank: a device with a local photo re-publishes it on
+         * the next edit, and one without simply receives it.
+         */
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE items ADD COLUMN imageHash TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "uhmk-pos.db")
                 .addMigrations(
@@ -232,6 +246,7 @@ abstract class AppDatabase : RoomDatabase() {
                     MIGRATION_7_8,
                     MIGRATION_8_9,
                     MIGRATION_9_10,
+                    MIGRATION_10_11,
                 )
                 .build()
     }
